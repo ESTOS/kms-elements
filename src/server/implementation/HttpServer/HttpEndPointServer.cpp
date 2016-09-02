@@ -27,7 +27,7 @@ namespace kurento
 std::shared_ptr<HttpEndPointServer> HttpEndPointServer::instance = 0;
 std::recursive_mutex HttpEndPointServer::mutex;
 
-uint HttpEndPointServer::port;
+unsigned HttpEndPointServer::port;
 std::string HttpEndPointServer::interface;
 std::string HttpEndPointServer::announcedAddr;
 
@@ -40,11 +40,11 @@ check_port (int port)
 }
 
 std::shared_ptr<HttpEndPointServer>
-HttpEndPointServer::getHttpEndPointServer (const uint port,
+HttpEndPointServer::getHttpEndPointServer (const unsigned port,
     const std::string &iface, const std::string &addr)
 {
   std::unique_lock <std::recursive_mutex> lock (mutex);
-  uint finalPort = port;
+  unsigned finalPort = port;
 
 
   if (instance) {
@@ -147,7 +147,7 @@ HttpEndPointServer::disconnectSignal (gulong id)
   g_signal_handler_disconnect (server, id);
 }
 
-uint
+unsigned
 HttpEndPointServer::getPort ()
 {
   guint port;

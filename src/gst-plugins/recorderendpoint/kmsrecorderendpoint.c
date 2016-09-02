@@ -728,7 +728,7 @@ kms_recorder_endpoint_create_parent_directories (KmsRecorderEndpoint * self)
     gchar *dir = g_path_get_dirname (file);
 
     // Try to create directory
-    if (g_mkdir_with_parents (dir, ALLPERMS) != 0) {
+    if (g_mkdir_with_parents (dir, 07777) != 0) {
       GST_WARNING_OBJECT (self, "Directory %s could not be created", dir);
     }
 

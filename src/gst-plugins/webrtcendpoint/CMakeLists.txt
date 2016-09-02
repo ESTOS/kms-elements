@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 2.8)
 
-set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
+if (NOT (${CMAKE_SYSTEM_NAME} MATCHES "Windows"))
+  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
+endif ()
 
 set(CUSTOM_PREFIX "kurento")
 set(INCLUDE_PREFIX "${CMAKE_INSTALL_INCLUDEDIR}/${CUSTOM_PREFIX}/webrtcendpoint")
@@ -121,6 +123,7 @@ target_link_libraries(kmswebrtcendpointlib
   ${gstreamer-base-1.5_LIBRARIES}
   ${gstreamer-pbutils-1.5_LIBRARIES}
   ${nice_LIBRARIES}
+  -lkmssdpagent -lgstsdp-1.5.dll
 )
 
 set_target_properties(kmswebrtcendpointlib PROPERTIES PUBLIC_HEADER "${KMS_WEBRTC_HEADERS}")

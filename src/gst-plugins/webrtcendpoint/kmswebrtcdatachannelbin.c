@@ -468,8 +468,16 @@ kms_webrtc_data_channel_bin_request_open (KmsWebRtcDataChannelBin * self)
       break;
     default:
       KMS_WEBRTC_DATA_CHANNEL_BIN_UNLOCK (self);
-      GST_ERROR_OBJECT (self, "Unsupported channel type (%hhx)",
-          (u_char) channel_type);
+#ifdef _WIN32
+      {
+        unsigned int channel_type_int = channel_type;
+
+        GST_ERROR_OBJECT (self, "Unsupported channel type (%x)",
+            channel_type_int);
+      }
+#else
+      GST_ERROR_OBJECT (self, "Unsupported channel type (%hhx)", channel_type);
+#endif
       return;
   }
 

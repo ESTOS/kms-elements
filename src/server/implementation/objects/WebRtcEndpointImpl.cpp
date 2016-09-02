@@ -433,7 +433,7 @@ WebRtcEndpointImpl::WebRtcEndpointImpl (const boost::property_tree::ptree &conf,
                        std::dynamic_pointer_cast<MediaObjectImpl>
                        (mediaPipeline), FACTORY_NAME)
 {
-  uint stunPort;
+  unsigned stunPort;
   std::string stunAddress;
   std::string turnURL;
 
@@ -449,7 +449,7 @@ WebRtcEndpointImpl::WebRtcEndpointImpl (const boost::property_tree::ptree &conf,
 
   //set properties
   try {
-    stunPort = getConfigValue <uint, WebRtcEndpoint> ("stunServerPort");
+    stunPort = getConfigValue <unsigned, WebRtcEndpoint> ("stunServerPort");
   } catch (std::exception &e) {
     GST_INFO ("Setting default port %d to stun server. Reason: %s",
               DEFAULT_STUN_PORT, e.what() );

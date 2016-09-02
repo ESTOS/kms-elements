@@ -45,6 +45,7 @@ target_link_libraries(rtpendpoint
   ${gstreamer-sdp-1.5_LIBRARIES}
   ${gstreamer-pbutils-1.5_LIBRARIES}
   ${nice_LIBRARIES}
+  -lkmssdpagent -lgstsdp-1.0.dll
 )
 
 install(

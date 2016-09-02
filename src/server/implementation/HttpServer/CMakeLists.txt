@@ -30,11 +30,19 @@ set(GEN_HEADERS
 add_glib_marshal(HTTP_EP_SOURCES HTTP_EP_HEADERS http-marshal http_marshal)
 add_glib_enumtypes(HTTP_EP_SOURCES HTTP_EP_HEADERS http-enumtypes KMS ${ENUM_HEADERS})
 
-add_library(kmshttpep ${HTTP_EP_SOURCES})
+add_library(kmshttpep STATIC ${HTTP_EP_SOURCES})
+
+if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+  set (HTTP_EP_FLAGS "-Wno-pedantic-ms-format")
+  set (HTTP_EP_LIBRARIES "-lrpcrt4")
+else ()
+  set (HTTP_EP_FLAGS "-fPIC")
+  set (HTTP_EP_LIBRARIES "")
+endif ()
 
 set_target_properties(kmshttpep PROPERTIES
   PUBLIC_HEADER "${HTTP_EP_HEADERS}"
-  COMPILE_FLAGS "-fPIC -Wno-deprecated-declarations"
+  COMPILE_FLAGS "${HTTP_EP_FLAGS} -Wno-deprecated-declarations"
 )
 
 include_directories(kmshttpep
@@ -55,4 +63,5 @@ target_link_libraries(kmshttpep
   ${gio-2.0_LIBRARIES}
   ${nice_LIBRARIES}
   ${KmsGstCommons_LIBRARIES}
+  ${HTTP_EP_LIBRARIES}
 )

@@ -56,7 +56,7 @@ RtpEndpointImpl::RtpEndpointImpl (const boost::property_tree::ptree &conf,
   }
 
   std::string key = crypto->getKey();
-  uint len;
+  unsigned len;
 
   switch (crypto->getCrypto()->getValue() ) {
   case CryptoSuite::AES_128_CM_HMAC_SHA1_32:
