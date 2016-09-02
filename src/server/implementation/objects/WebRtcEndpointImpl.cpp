@@ -54,7 +54,7 @@ GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
 namespace kurento
 {
 
-static const uint DEFAULT_STUN_PORT = 3478;
+static const guint DEFAULT_STUN_PORT = 3478;
 
 std::once_flag check_openh264, certificates_flag;
 std::string defaultCertificateRSA, defaultCertificateECDSA;
