@@ -74,7 +74,7 @@ kms_srtp_session_create_connection (KmsBaseRtpSession * base_rtp_sess,
 
   media_str = gst_sdp_media_get_media (media);
 
-  if (g_strcmp0 (media_str, "audio") == 0)      //ru-bu todo check audio
+  if (g_strcmp0 (media_str, "audio") == 0)      //ru-bu check audio
   {
 
     conn = kms_srtp_connection_new (min_port, max_port,

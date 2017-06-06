@@ -378,7 +378,7 @@ kms_rtp_endpoint_create_session_internal (KmsBaseSdpEndpoint * base_sdp,
   gchar *local_address = NULL;
 
   /* Get ip address now that session is bein created */
-  /* only if it is not already set rbu */
+  /* only if it is not already set ru-bu */
   g_object_get (self, "addr", &local_address, NULL);
   if (local_address == NULL) {
     kms_rtp_endpoint_set_addr (self);

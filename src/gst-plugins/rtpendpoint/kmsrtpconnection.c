@@ -263,7 +263,7 @@ kms_rtp_connection_new (guint16 min_port, guint16 max_port, gboolean use_ipv6,
   priv = conn->priv;
 
   if (rtp_socket_reuse != NULL && rtcp_socket_reuse != NULL) {
-    priv->rtp_socket = rtp_socket_reuse;        //ru-bu todo revcount checken
+    priv->rtp_socket = rtp_socket_reuse;        //ru-bu
     priv->rtcp_socket = rtcp_socket_reuse;
   } else {
     if (use_ipv6) {
