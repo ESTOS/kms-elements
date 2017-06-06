@@ -21,7 +21,6 @@
 #include "kmsrtpbaseconnection.h"
 
 G_BEGIN_DECLS
-
 #define KMS_TYPE_SRTP_CONNECTION \
   (kms_srtp_connection_get_type())
 #define KMS_SRTP_CONNECTION(obj) \
@@ -33,9 +32,10 @@ G_BEGIN_DECLS
 #define KMS_IS_SRTP_CONNECTION_CLASS(klass) \
   (G_TYPE_CHECK_CLASS_TYPE((klass),KMS_TYPE_SRTP_CONNECTION))
 #define KMS_SRTP_CONNECTION_CAST(obj) ((KmsSrtpConnection*)(obj))
-
 typedef struct _KmsSrtpConnectionPrivate KmsSrtpConnectionPrivate;
+
 typedef struct _KmsSrtpConnection KmsSrtpConnection;
+
 typedef struct _KmsSrtpConnectionClass KmsSrtpConnectionClass;
 
 struct _KmsSrtpConnection
@@ -50,13 +50,15 @@ struct _KmsSrtpConnectionClass
   KmsRtpBaseConnectionClass parent_class;
 
   /* signals */
-  void (*key_soft_limit) (KmsSrtpConnection *conn);
+  void (*key_soft_limit) (KmsSrtpConnection * conn);
 };
 
 GType kms_srtp_connection_get_type (void);
 
-KmsSrtpConnection *kms_srtp_connection_new (guint16 min_port, guint16 max_port, gboolean use_ipv6);
-void kms_srtp_connection_set_key (KmsSrtpConnection *conn, const gchar *key, guint auth, guint cipher, gboolean local);
+KmsSrtpConnection *kms_srtp_connection_new (guint16 min_port, guint16 max_port,
+    gboolean use_ipv6, GSocket * rtp_socket_reuse, GSocket * rtcp_socket_reuse);
+void kms_srtp_connection_set_key (KmsSrtpConnection * conn, const gchar * key,
+    guint auth, guint cipher, gboolean local);
 
 G_END_DECLS
 #endif /* __KMS_RTP_CONNECTION_H__ */

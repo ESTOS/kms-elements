@@ -38,7 +38,10 @@ enum
   PROP_CONNECTED,
   PROP_IS_CLIENT,
   PROP_MIN_PORT,
-  PROP_MAX_PORT
+  PROP_MAX_PORT,
+  PROP_FINALIZE_SOCKET,
+  PROP_RTP_SOCKET,
+  PROP_RTCP_SOCKET
 };
 
 struct _KmsRtpConnectionPrivate
@@ -50,6 +53,8 @@ struct _KmsRtpConnectionPrivate
   GSocket *rtcp_socket;
   GstElement *rtcp_udpsink;
   GstElement *rtcp_udpsrc;
+
+  gboolean finalize_socket;
 
   gboolean added;
   gboolean connected;
@@ -85,6 +90,7 @@ kms_rtp_connection_set_remote_info (KmsRtpBaseConnection * base_conn,
     const gchar * host, gint rtp_port, gint rtcp_port)
 {
   KmsRtpConnection *self = KMS_RTP_CONNECTION (base_conn);
+
   KmsRtpConnectionPrivate *priv = self->priv;
 
   g_signal_emit_by_name (priv->rtp_udpsink, "add", host, rtp_port, NULL);
@@ -96,6 +102,7 @@ kms_rtp_connection_add (KmsIRtpConnection * base_rtp_conn, GstBin * bin,
     gboolean active)
 {
   KmsRtpConnection *self = KMS_RTP_CONNECTION (base_rtp_conn);
+
   KmsRtpConnectionPrivate *priv = self->priv;
 
   self->priv->is_client = active;
@@ -111,6 +118,7 @@ kms_rtp_connection_src_sync_state_with_parent (KmsIRtpConnection *
     base_rtp_conn)
 {
   KmsRtpConnection *self = KMS_RTP_CONNECTION (base_rtp_conn);
+
   KmsRtpConnectionPrivate *priv = self->priv;
 
   gst_element_sync_state_with_parent (priv->rtp_udpsrc);
@@ -122,6 +130,7 @@ kms_rtp_connection_sink_sync_state_with_parent (KmsIRtpConnection *
     base_rtp_conn)
 {
   KmsRtpConnection *self = KMS_RTP_CONNECTION (base_rtp_conn);
+
   KmsRtpConnectionPrivate *priv = self->priv;
 
   gst_element_sync_state_with_parent (priv->rtp_udpsink);
@@ -179,6 +188,21 @@ kms_rtp_connection_set_property (GObject * object, guint prop_id,
     case PROP_MAX_PORT:
       self->parent.max_port = g_value_get_uint (value);
       break;
+    case PROP_FINALIZE_SOCKET: //ru-bu
+      self->priv->finalize_socket = g_value_get_boolean (value);
+      if (self->priv->rtp_udpsink != NULL)
+        g_object_set (self->priv->rtp_udpsink, "close-socket",
+            self->priv->finalize_socket, NULL);
+      if (self->priv->rtp_udpsrc != NULL)
+        g_object_set (self->priv->rtp_udpsrc, "close-socket",
+            self->priv->finalize_socket, NULL);
+      if (self->priv->rtcp_udpsink != NULL)
+        g_object_set (self->priv->rtcp_udpsink, "close-socket",
+            self->priv->finalize_socket, NULL);
+      if (self->priv->rtcp_udpsrc != NULL)
+        g_object_set (self->priv->rtcp_udpsrc, "close-socket",
+            self->priv->finalize_socket, NULL);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -207,6 +231,15 @@ kms_rtp_connection_get_property (GObject * object,
     case PROP_MAX_PORT:
       g_value_set_uint (value, self->parent.max_port);
       break;
+    case PROP_FINALIZE_SOCKET:
+      g_value_set_boolean (value, self->priv->finalize_socket);
+      break;
+    case PROP_RTP_SOCKET:
+      g_value_set_pointer (value, self->priv->rtp_socket);
+      break;
+    case PROP_RTCP_SOCKET:
+      g_value_set_pointer (value, self->priv->rtcp_socket);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -214,29 +247,38 @@ kms_rtp_connection_get_property (GObject * object,
 }
 
 KmsRtpConnection *
-kms_rtp_connection_new (guint16 min_port, guint16 max_port, gboolean use_ipv6)
+kms_rtp_connection_new (guint16 min_port, guint16 max_port, gboolean use_ipv6,
+    GSocket * rtp_socket_reuse, GSocket * rtcp_socket_reuse)
 {
   GObject *obj;
+
   KmsRtpConnection *conn;
+
   KmsRtpConnectionPrivate *priv;
+
   GSocketFamily socket_family;
 
   obj = g_object_new (KMS_TYPE_RTP_CONNECTION, NULL);
   conn = KMS_RTP_CONNECTION (obj);
   priv = conn->priv;
 
-  if (use_ipv6) {
-    socket_family = G_SOCKET_FAMILY_IPV6;
+  if (rtp_socket_reuse != NULL && rtcp_socket_reuse != NULL) {
+    priv->rtp_socket = rtp_socket_reuse;        //ru-bu todo revcount checken
+    priv->rtcp_socket = rtcp_socket_reuse;
   } else {
-    socket_family = G_SOCKET_FAMILY_IPV4;
-  }
+    if (use_ipv6) {
+      socket_family = G_SOCKET_FAMILY_IPV6;
+    } else {
+      socket_family = G_SOCKET_FAMILY_IPV4;
+    }
 
-  if (!kms_rtp_connection_get_rtp_rtcp_sockets
-      (&priv->rtp_socket, &priv->rtcp_socket, min_port, max_port,
-          socket_family)) {
-    GST_ERROR_OBJECT (obj, "Cannot get ports");
-    g_object_unref (obj);
-    return NULL;
+    if (!kms_rtp_connection_get_rtp_rtcp_sockets
+        (&priv->rtp_socket, &priv->rtcp_socket, min_port, max_port,
+            socket_family)) {
+      GST_ERROR_OBJECT (obj, "Cannot get ports");
+      g_object_unref (obj);
+      return NULL;
+    }
   }
 
   priv->rtp_udpsink = gst_element_factory_make ("multiudpsink", NULL);
@@ -262,6 +304,7 @@ static void
 kms_rtp_connection_enable_latency_stats (KmsRtpBaseConnection * base)
 {
   KmsRtpConnection *self = KMS_RTP_CONNECTION (base);
+
   GstPad *pad;
 
   kms_rtp_base_connection_remove_probe (base, self->priv->rtp_udpsrc, "src",
@@ -316,6 +359,7 @@ static void
 kms_rtp_connection_finalize (GObject * object)
 {
   KmsRtpConnection *self = KMS_RTP_CONNECTION (object);
+
   KmsRtpConnectionPrivate *priv = self->priv;
 
   GST_DEBUG_OBJECT (self, "finalize");
@@ -325,11 +369,13 @@ kms_rtp_connection_finalize (GObject * object)
 
   g_clear_object (&priv->rtp_udpsink);
   g_clear_object (&priv->rtp_udpsrc);
-  kms_socket_finalize (&self->priv->rtp_socket);
+  if (self->priv->finalize_socket)
+    kms_socket_finalize (&self->priv->rtp_socket);
 
   g_clear_object (&priv->rtcp_udpsink);
   g_clear_object (&priv->rtcp_udpsrc);
-  kms_socket_finalize (&self->priv->rtcp_socket);
+  if (self->priv->finalize_socket)
+    kms_socket_finalize (&self->priv->rtcp_socket);
 
   /* chain up */
   G_OBJECT_CLASS (kms_rtp_connection_parent_class)->finalize (object);
@@ -340,12 +386,14 @@ kms_rtp_connection_init (KmsRtpConnection * self)
 {
   self->priv = KMS_RTP_CONNECTION_GET_PRIVATE (self);
   self->priv->connected = FALSE;
+  self->priv->finalize_socket = TRUE;
 }
 
 static void
 kms_rtp_connection_class_init (KmsRtpConnectionClass * klass)
 {
   GObjectClass *gobject_class;
+
   KmsRtpBaseConnectionClass *base_conn_class;
 
   GST_DEBUG_CATEGORY_INIT (GST_CAT_DEFAULT, GST_DEFAULT_NAME, 0,
@@ -368,6 +416,12 @@ kms_rtp_connection_class_init (KmsRtpConnectionClass * klass)
   g_object_class_override_property (gobject_class, PROP_IS_CLIENT, "is-client");
   g_object_class_override_property (gobject_class, PROP_MAX_PORT, "max-port");
   g_object_class_override_property (gobject_class, PROP_MIN_PORT, "min-port");
+  g_object_class_override_property (gobject_class, PROP_FINALIZE_SOCKET,
+      "finalize-socket");
+  g_object_class_override_property (gobject_class, PROP_RTP_SOCKET,
+      "rtp-socket");
+  g_object_class_override_property (gobject_class, PROP_RTCP_SOCKET,
+      "rtcp-socket");
 }
 
 static void

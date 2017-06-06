@@ -193,6 +193,7 @@ kms_webrtc_endpoint_add_data_src_pad (KmsWebrtcEndpoint * self, GstPad * pad,
     const gchar * description)
 {
   GstElement *data_tee;
+
   GstPad *sink;
 
   data_tee = kms_element_get_data_output_element (KMS_ELEMENT (self),
@@ -215,6 +216,7 @@ kms_webrtc_endpoint_add_pad (KmsWebrtcSession * session, GstPad * pad,
     KmsElementPadType type, const gchar * description, gpointer user_data)
 {
   KmsWebrtcEndpoint *self = KMS_WEBRTC_ENDPOINT (user_data);
+
   gboolean ret = FALSE;
 
   if (type != KMS_ELEMENT_PAD_TYPE_DATA) {
@@ -286,8 +288,11 @@ kms_webrtc_endpoint_create_session_internal (KmsBaseSdpEndpoint * base_sdp,
     gint id, KmsSdpSession ** sess)
 {
   KmsWebrtcEndpoint *self = KMS_WEBRTC_ENDPOINT (base_sdp);
+
   KmsIRtpSessionManager *manager = KMS_I_RTP_SESSION_MANAGER (self);
+
   KmsWebrtcSessionCallbacks callbacks;
+
   KmsWebrtcSession *webrtc_sess;
 
   webrtc_sess =
@@ -367,7 +372,14 @@ kms_webrtc_endpoint_configure_media (KmsBaseSdpEndpoint *
     GstSDPMedia * media)
 {
   KmsWebrtcSession *webrtc_sess = KMS_WEBRTC_SESSION (sess);
+
   gboolean ret;
+
+  sess->reuse_socket = FALSE;   //ru-bu safety dont use it for webrtc
+  sess->rtp_socket_reuse_audio = NULL;
+  sess->rtcp_socket_reuse_audio = NULL;
+  sess->rtp_socket_reuse_video = NULL;
+  sess->rtcp_socket_reuse_video = NULL;
 
   /* Chain up */
   ret = KMS_BASE_SDP_ENDPOINT_CLASS
@@ -407,8 +419,11 @@ kms_webrtc_endpoint_gather_candidates (KmsWebrtcEndpoint * self,
     const gchar * sess_id)
 {
   KmsBaseSdpEndpoint *base_sdp_ep = KMS_BASE_SDP_ENDPOINT (self);
+
   KmsSdpSession *sess;
+
   KmsWebrtcSession *webrtc_sess;
+
   gboolean ret = TRUE;
 
   GST_DEBUG_OBJECT (self, "Gather candidates for session '%s'", sess_id);
@@ -430,8 +445,11 @@ kms_webrtc_endpoint_add_ice_candidate (KmsWebrtcEndpoint * self,
     const gchar * sess_id, KmsIceCandidate * candidate)
 {
   KmsBaseSdpEndpoint *base_sdp_ep = KMS_BASE_SDP_ENDPOINT (self);
+
   KmsSdpSession *sess;
+
   KmsWebrtcSession *webrtc_sess;
+
   gboolean ret;
 
   GST_DEBUG_OBJECT (self, "Add ICE candidate '%s' for session '%s'",
@@ -552,8 +570,11 @@ kms_webrtc_endpoint_create_data_channel (KmsWebrtcEndpoint * self,
     gint max_retransmits, const gchar * label, const gchar * protocol)
 {
   KmsBaseSdpEndpoint *base_sdp_ep = KMS_BASE_SDP_ENDPOINT (self);
+
   KmsSdpSession *sess;
+
   KmsWebrtcSession *webrtc_sess;
+
   gint stream_id;
 
   sess = kms_base_sdp_endpoint_get_session (base_sdp_ep, sess_id);
@@ -574,7 +595,9 @@ kms_webrtc_endpoint_destroy_data_channel (KmsWebrtcEndpoint * self,
     const gchar * sess_id, gint stream_id)
 {
   KmsBaseSdpEndpoint *base_sdp_ep = KMS_BASE_SDP_ENDPOINT (self);
+
   KmsSdpSession *sess;
+
   KmsWebrtcSession *webrtc_sess;
 
   sess = kms_base_sdp_endpoint_get_session (base_sdp_ep, sess_id);
@@ -592,8 +615,11 @@ kms_webrtc_endpoint_get_data_channel_supported (KmsWebrtcEndpoint * self,
     const gchar * sess_id)
 {
   KmsBaseSdpEndpoint *base_sdp_ep = KMS_BASE_SDP_ENDPOINT (self);
+
   KmsSdpSession *sess;
+
   KmsWebrtcSession *webrtc_sess;
+
   gboolean ret;
 
   sess = kms_base_sdp_endpoint_get_session (base_sdp_ep, sess_id);
@@ -627,8 +653,11 @@ static GstStructure *
 kms_webrtc_endpoint_stats (KmsElement * obj, gchar * selector)
 {
   KmsWebrtcEndpoint *self = KMS_WEBRTC_ENDPOINT (obj);
+
   GstStructure *stats;
+
   KmsSessStats ss;
+
   GHashTable *sessions;
 
   /* chain up */
@@ -649,7 +678,9 @@ static void
 kms_webrtc_endpoint_class_init (KmsWebrtcEndpointClass * klass)
 {
   GObjectClass *gobject_class;
+
   KmsElementClass *kmselement_class;
+
   KmsBaseSdpEndpointClass *base_sdp_endpoint_class;
 
   gobject_class = G_OBJECT_CLASS (klass);

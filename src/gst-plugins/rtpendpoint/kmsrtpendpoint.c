@@ -191,7 +191,9 @@ kms_rtp_endpoint_set_local_srtp_connection_key (KmsRtpEndpoint * self,
     const gchar * media, SdesKeys * sdes_keys)
 {
   SrtpCryptoSuite crypto;
+
   guint auth, cipher;
+
   gchar *key;
 
   if (!G_IS_VALUE (&sdes_keys->local)) {
@@ -224,9 +226,13 @@ kms_rtp_endpoint_set_remote_srtp_connection_key (KmsRtpEndpoint * self,
     const gchar * media, SdesKeys * sdes_keys)
 {
   SrtpCryptoSuite my_crypto, rem_crypto;
+
   guint my_tag, rem_tag;
+
   gchar *rem_key = NULL;
+
   gboolean done = FALSE;
+
   guint auth, cipher;
 
   if (!G_IS_VALUE (&sdes_keys->local) || !G_IS_VALUE (&sdes_keys->remote)) {
@@ -272,6 +278,7 @@ static void
 conn_soft_limit_cb (KmsSrtpConnection * conn, gpointer user_data)
 {
   SdesExtData *data = (SdesExtData *) user_data;
+
   KmsRtpEndpoint *self = data->rtpep;
 
   g_signal_emit (self, obj_signals[SIGNAL_KEY_SOFT_LIMIT], 0, data->media);
@@ -283,6 +290,7 @@ kms_rtp_endpoint_get_connection (KmsRtpEndpoint * self, KmsSdpSession * sess,
 {
   if (self->priv->use_sdes) {
     KmsRtpBaseConnection *conn;
+
     SdesExtData *data;
 
     conn = kms_srtp_session_get_connection (KMS_SRTP_SESSION (sess), handler);
@@ -304,11 +312,13 @@ static void
 kms_rtp_endpoint_set_addr (KmsRtpEndpoint * self)
 {
   GList *ips, *l;
+
   gboolean done = FALSE;
 
   ips = nice_interfaces_get_local_ips (FALSE);
   for (l = ips; l != NULL && !done; l = l->next) {
     GInetAddress *addr;
+
     gboolean is_ipv6 = FALSE;
 
     addr = g_inet_address_new_from_string (l->data);
@@ -323,6 +333,7 @@ kms_rtp_endpoint_set_addr (KmsRtpEndpoint * self)
         case G_SOCKET_FAMILY_IPV4:
         {
           gchar *addr_str;
+
           gboolean use_ipv6;
 
           g_object_get (self, "use-ipv6", &use_ipv6, NULL);
@@ -359,11 +370,21 @@ kms_rtp_endpoint_create_session_internal (KmsBaseSdpEndpoint * base_sdp,
     gint id, KmsSdpSession ** sess)
 {
   KmsIRtpSessionManager *manager = KMS_I_RTP_SESSION_MANAGER (base_sdp);
+
   KmsRtpEndpoint *self = KMS_RTP_ENDPOINT (base_sdp);
+
   gboolean use_ipv6 = FALSE;
 
+  gchar *local_address = NULL;
+
   /* Get ip address now that session is bein created */
-  kms_rtp_endpoint_set_addr (self);
+  /* only if it is not already set rbu */
+  g_object_get (self, "addr", &local_address, NULL);
+  if (local_address == NULL) {
+    kms_rtp_endpoint_set_addr (self);
+  } else {
+    g_free (local_address);
+  }
 
   g_object_get (self, "use-ipv6", &use_ipv6, NULL);
   if (self->priv->use_sdes) {
@@ -437,8 +458,11 @@ static GArray *
 kms_rtp_endpoint_on_offer_keys_cb (KmsSdpSdesExt * ext, SdesExtData * edata)
 {
   KmsRtpEndpoint *self = KMS_RTP_ENDPOINT (edata->rtpep);
+
   GValue key = G_VALUE_INIT;
+
   SdesKeys *sdes_keys;
+
   GArray *keys;
 
   KMS_ELEMENT_LOCK (self);
@@ -518,9 +542,13 @@ kms_rtp_endpoint_on_answer_keys_cb (KmsSdpSdesExt * ext, const GArray * keys,
     GValue * key, SdesExtData * edata)
 {
   KmsRtpEndpoint *self = KMS_RTP_ENDPOINT (edata->rtpep);
+
   SdesKeys *sdes_keys;
+
   GValue *offer_key;
+
   gboolean ret = FALSE;
+
   guint tag;
 
   if (keys->len == 0) {
@@ -572,6 +600,7 @@ kms_rtp_endpoint_on_selected_key_cb (KmsSdpSdesExt * ext, const GValue * key,
     SdesExtData * edata)
 {
   KmsRtpEndpoint *self = KMS_RTP_ENDPOINT (edata->rtpep);
+
   SdesKeys *sdes_keys;
 
   KMS_ELEMENT_LOCK (self);
@@ -597,8 +626,11 @@ kms_rtp_endpoint_provide_sdes_handler (KmsRtpEndpoint * self,
     const gchar * media)
 {
   KmsSdpMediaHandler *handler;
+
   SdesKeys *sdes_keys;
+
   SdesExtData *edata;
+
   KmsSdpSdesExt *ext;
 
   handler = KMS_SDP_MEDIA_HANDLER (kms_sdp_rtp_savpf_media_handler_new ());
@@ -706,9 +738,13 @@ kms_rtp_endpoint_configure_media (KmsBaseSdpEndpoint * base_sdp_endpoint,
     KmsSdpSession * sess, KmsSdpMediaHandler * handler, GstSDPMedia * media)
 {
   KmsRtpEndpoint *self = KMS_RTP_ENDPOINT (base_sdp_endpoint);
+
   guint conn_len, c;
+
   guint attr_len, a;
+
   KmsRtpBaseConnection *conn;
+
   gboolean ret = TRUE;
 
   /* Chain up */
@@ -761,7 +797,9 @@ kms_rtp_endpoint_start_transport_send (KmsBaseSdpEndpoint *
     base_sdp_endpoint, KmsSdpSession * sess, gboolean offerer)
 {
   KmsRtpEndpoint *self = KMS_RTP_ENDPOINT (base_sdp_endpoint);
+
   const GstSDPConnection *msg_conn;
+
   guint index, len;
 
   /* Chain up */
@@ -775,8 +813,11 @@ kms_rtp_endpoint_start_transport_send (KmsBaseSdpEndpoint *
     const GstSDPMedia *media =
         gst_sdp_message_get_media (sess->remote_sdp, index);
     const GstSDPConnection *media_con;
+
     KmsSdpMediaHandler *handler;
+
     KmsRtpBaseConnection *conn;
+
     guint port;
 
     if (media->port == 0) {
@@ -831,6 +872,7 @@ kms_rtp_endpoint_set_property (GObject * object, guint prop_id,
   switch (prop_id) {
     case PROP_MASTER_KEY:{
       gchar *key;
+
       guint len;
 
       key = g_value_dup_string (value);
@@ -909,7 +951,9 @@ static void
 kms_rtp_endpoint_class_init (KmsRtpEndpointClass * klass)
 {
   GObjectClass *gobject_class;
+
   KmsBaseSdpEndpointClass *base_sdp_endpoint_class;
+
   GstElementClass *gstelement_class;
 
   gobject_class = G_OBJECT_CLASS (klass);

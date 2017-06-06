@@ -33,7 +33,9 @@ G_BEGIN_DECLS
   (G_TYPE_CHECK_CLASS_TYPE((klass),KMS_TYPE_RTP_CONNECTION))
 #define KMS_RTP_CONNECTION_CAST(obj) ((KmsRtpConnection*)(obj))
 typedef struct _KmsRtpConnectionPrivate KmsRtpConnectionPrivate;
+
 typedef struct _KmsRtpConnection KmsRtpConnection;
+
 typedef struct _KmsRtpConnectionClass KmsRtpConnectionClass;
 
 struct _KmsRtpConnection
@@ -51,7 +53,7 @@ struct _KmsRtpConnectionClass
 GType kms_rtp_connection_get_type (void);
 
 KmsRtpConnection *kms_rtp_connection_new (guint16 min_port, guint16 max_port,
-    gboolean use_ipv6);
+    gboolean use_ipv6, GSocket * rtp_socket_reuse, GSocket * rtcp_socket_reuse);
 
 G_END_DECLS
 #endif /* __KMS_RTP_CONNECTION_H__ */

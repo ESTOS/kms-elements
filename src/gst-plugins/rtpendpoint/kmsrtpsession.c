@@ -33,6 +33,7 @@ kms_rtp_session_new (KmsBaseSdpEndpoint * ep, guint id,
     KmsIRtpSessionManager * manager, gboolean use_ipv6)
 {
   GObject *obj;
+
   KmsRtpSession *self;
 
   obj = g_object_new (KMS_TYPE_RTP_SESSION, NULL);
@@ -50,6 +51,7 @@ kms_rtp_session_get_connection (KmsRtpSession * self,
     KmsSdpMediaHandler * handler)
 {
   KmsBaseRtpSession *base_rtp_sess = KMS_BASE_RTP_SESSION (self);
+
   KmsIRtpConnection *conn;
 
   conn = kms_base_rtp_session_get_connection (base_rtp_sess, handler);
@@ -65,9 +67,29 @@ kms_rtp_session_create_connection (KmsBaseRtpSession * base_rtp_sess,
     const GstSDPMedia * media, const gchar * name, guint16 min_port,
     guint16 max_port)
 {
-  KmsRtpConnection *conn = kms_rtp_connection_new (min_port, max_port,
-      KMS_RTP_SESSION (base_rtp_sess)->use_ipv6);
+  const gchar *media_str;
 
+  KmsRtpConnection *conn = NULL;
+
+  media_str = gst_sdp_media_get_media (media);
+
+  if (g_strcmp0 (media_str, "audio") == 0)      //ru-bu todo check audio
+  {
+
+    conn = kms_rtp_connection_new (min_port, max_port,
+        KMS_RTP_SESSION (base_rtp_sess)->use_ipv6,
+        KMS_SDP_SESSION (base_rtp_sess)->rtp_socket_reuse_audio,
+        KMS_SDP_SESSION (base_rtp_sess)->rtcp_socket_reuse_audio);
+
+  } else if (g_strcmp0 (media_str, "video") == 0) {
+    conn = kms_rtp_connection_new (min_port, max_port,
+        KMS_RTP_SESSION (base_rtp_sess)->use_ipv6,
+        KMS_SDP_SESSION (base_rtp_sess)->rtp_socket_reuse_video,
+        KMS_SDP_SESSION (base_rtp_sess)->rtcp_socket_reuse_video);
+  } else {
+    conn = kms_rtp_connection_new (min_port, max_port,
+        KMS_RTP_SESSION (base_rtp_sess)->use_ipv6, NULL, NULL);
+  }
   return KMS_I_RTP_CONNECTION (conn);
 }
 
@@ -96,6 +118,7 @@ static void
 kms_rtp_session_class_init (KmsRtpSessionClass * klass)
 {
   GstElementClass *gstelement_class = GST_ELEMENT_CLASS (klass);
+
   KmsBaseRtpSessionClass *base_rtp_session_class;
 
   GST_DEBUG_CATEGORY_INIT (GST_CAT_DEFAULT, GST_DEFAULT_NAME, 0,
