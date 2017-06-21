@@ -40,7 +40,10 @@ enum
   PROP_CONNECTED,
   PROP_IS_CLIENT,
   PROP_MIN_PORT,
-  PROP_MAX_PORT
+  PROP_MAX_PORT,
+  PROP_FINALIZE_SOCKET,
+  PROP_RTP_SOCKET,
+  PROP_RTCP_SOCKET
 };
 
 struct _KmsWebRtcSctpConnectionPrivate
@@ -64,6 +67,7 @@ kms_webrtc_sctp_connection_get_certificate_pem (KmsWebRtcBaseConnection *
     base_conn)
 {
   KmsWebRtcSctpConnection *self = KMS_WEBRTC_SCTP_CONNECTION (base_conn);
+
   gchar *pem;
 
   g_object_get (G_OBJECT (self->priv->tr->src->dtlssrtpdec), "pem", &pem, NULL);
@@ -76,7 +80,9 @@ kms_webrtc_sctp_connection_add (KmsIRtpConnection * base_conn, GstBin * bin,
     gboolean active)
 {
   KmsWebRtcSctpConnection *self = KMS_WEBRTC_SCTP_CONNECTION (base_conn);
+
   KmsWebRtcSctpConnectionPrivate *priv = self->priv;
+
   KmsWebRtcTransport *tr = priv->tr;
 
   g_object_set (G_OBJECT (tr->sink->dtlssrtpenc), "is-client", active, NULL);
@@ -90,6 +96,7 @@ kms_webrtc_sctp_connection_src_sync_state_with_parent (KmsIRtpConnection *
     base_conn)
 {
   KmsWebRtcSctpConnection *self = KMS_WEBRTC_SCTP_CONNECTION (base_conn);
+
   GstElement *element = GST_ELEMENT (self->priv->tr->src);
 
   gst_element_sync_state_with_parent_target_state (element);
@@ -100,6 +107,7 @@ kms_webrtc_sctp_connection_sink_sync_state_with_parent (KmsIRtpConnection *
     base_conn)
 {
   KmsWebRtcSctpConnection *self = KMS_WEBRTC_SCTP_CONNECTION (base_conn);
+
   GstElement *element = GST_ELEMENT (self->priv->tr->sink);
 
   gst_element_sync_state_with_parent_target_state (element);
@@ -225,8 +233,11 @@ kms_webrtc_sctp_connection_new (KmsIceBaseAgent * agent, GMainContext * context,
     gchar * pem_certificate)
 {
   GObject *obj;
+
   KmsWebRtcBaseConnection *base_conn;
+
   KmsWebRtcSctpConnection *conn;
+
   KmsWebRtcSctpConnectionPrivate *priv;
 
   obj =
@@ -261,6 +272,7 @@ static void
 kms_webrtc_sctp_connection_finalize (GObject * object)
 {
   KmsWebRtcSctpConnection *self = KMS_WEBRTC_SCTP_CONNECTION (object);
+
   KmsWebRtcSctpConnectionPrivate *priv = self->priv;
 
   GST_DEBUG_OBJECT (self, "finalize");
@@ -282,6 +294,7 @@ static void
 kms_webrtc_sctp_connection_class_init (KmsWebRtcSctpConnectionClass * klass)
 {
   GObjectClass *gobject_class;
+
   KmsWebRtcBaseConnectionClass *base_conn_class;
 
   gobject_class = G_OBJECT_CLASS (klass);
@@ -303,6 +316,12 @@ kms_webrtc_sctp_connection_class_init (KmsWebRtcSctpConnectionClass * klass)
   g_object_class_override_property (gobject_class, PROP_IS_CLIENT, "is-client");
   g_object_class_override_property (gobject_class, PROP_MAX_PORT, "max-port");
   g_object_class_override_property (gobject_class, PROP_MIN_PORT, "min-port");
+  g_object_class_override_property (gobject_class, PROP_FINALIZE_SOCKET,
+      "finalize-socket");
+  g_object_class_override_property (gobject_class, PROP_RTP_SOCKET,
+      "rtp-socket");
+  g_object_class_override_property (gobject_class, PROP_RTCP_SOCKET,
+      "rtcp-socket");
 }
 
 static void

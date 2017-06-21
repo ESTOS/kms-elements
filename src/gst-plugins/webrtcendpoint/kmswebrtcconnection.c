@@ -39,6 +39,9 @@ enum
   PROP_IS_CLIENT,
   PROP_MIN_PORT,
   PROP_MAX_PORT,
+  PROP_FINALIZE_SOCKET,
+  PROP_RTP_SOCKET,
+  PROP_RTCP_SOCKET,
   PROP_TRANSPORT,
   PROP_RTCP_TRANSPORT
 };
@@ -68,6 +71,7 @@ static gchar *
 kms_webrtc_connection_get_certificate_pem (KmsWebRtcBaseConnection * base_conn)
 {
   KmsWebRtcConnection *self = KMS_WEBRTC_CONNECTION (base_conn);
+
   gchar *pem;
 
   g_object_get (G_OBJECT (self->priv->rtp_tr->src->dtlssrtpdec), "pem", &pem,
@@ -100,7 +104,9 @@ kms_webrtc_rtp_connection_src_sync_state_with_parent (KmsIRtpConnection *
     base_rtp_conn)
 {
   KmsWebRtcConnection *self = KMS_WEBRTC_CONNECTION (base_rtp_conn);
+
   GstElement *rtp_element = GST_ELEMENT (self->priv->rtp_tr->src);
+
   GstElement *rtcp_element = GST_ELEMENT (self->priv->rtcp_tr->src);
 
   gst_element_sync_state_with_parent_target_state (rtp_element);
@@ -112,7 +118,9 @@ kms_webrtc_rtp_connection_sink_sync_state_with_parent (KmsIRtpConnection *
     base_rtp_conn)
 {
   KmsWebRtcConnection *self = KMS_WEBRTC_CONNECTION (base_rtp_conn);
+
   GstElement *rtp_element = GST_ELEMENT (self->priv->rtp_tr->sink);
+
   GstElement *rtcp_element = GST_ELEMENT (self->priv->rtcp_tr->sink);
 
   gst_element_sync_state_with_parent_target_state (rtp_element);
@@ -123,7 +131,9 @@ static GstPad *
 kms_webrtc_rtp_connection_request_rtp_sink (KmsIRtpConnection * base_rtp_conn)
 {
   KmsWebRtcConnection *self = KMS_WEBRTC_CONNECTION (base_rtp_conn);
+
   GstPad *pad;
+
   gchar *str;
 
   str = g_strdup_printf ("rtp_sink_%d",
@@ -149,7 +159,9 @@ static GstPad *
 kms_webrtc_rtp_connection_request_rtcp_sink (KmsIRtpConnection * base_rtp_conn)
 {
   KmsWebRtcConnection *self = KMS_WEBRTC_CONNECTION (base_rtp_conn);
+
   GstPad *pad;
+
   gchar *str;
 
   str = g_strdup_printf ("rtcp_sink_%d",
@@ -239,6 +251,7 @@ static void
 rtp_connected_cb (GstElement * dtlssrtpenc, gpointer data)
 {
   KmsWebRtcConnection *self = data;
+
   gboolean signal;
 
   g_mutex_lock (&self->priv->mutex);
@@ -255,6 +268,7 @@ static void
 rtcp_connected_cb (GstElement * dtlssrtpenc, gpointer data)
 {
   KmsWebRtcConnection *self = data;
+
   gboolean signal;
 
   g_mutex_lock (&self->priv->mutex);
@@ -273,8 +287,11 @@ kms_webrtc_connection_new (KmsIceBaseAgent * agent, GMainContext * context,
     gchar * pem_certificate)
 {
   GObject *obj;
+
   KmsWebRtcBaseConnection *base_conn;
+
   KmsWebRtcConnection *conn;
+
   KmsWebRtcConnectionPrivate *priv;
 
   obj = g_object_new (KMS_TYPE_WEBRTC_CONNECTION, "max-port", max_port,
@@ -313,6 +330,7 @@ static void
 kms_webrtc_connection_finalize (GObject * object)
 {
   KmsWebRtcConnection *self = KMS_WEBRTC_CONNECTION (object);
+
   KmsWebRtcConnectionPrivate *priv = self->priv;
 
   GST_DEBUG_OBJECT (self, "finalize");
@@ -339,6 +357,7 @@ static void
 kms_webrtc_connection_class_init (KmsWebRtcConnectionClass * klass)
 {
   GObjectClass *gobject_class;
+
   KmsWebRtcBaseConnectionClass *base_conn_class;
 
   gobject_class = G_OBJECT_CLASS (klass);
@@ -360,6 +379,12 @@ kms_webrtc_connection_class_init (KmsWebRtcConnectionClass * klass)
   g_object_class_override_property (gobject_class, PROP_IS_CLIENT, "is-client");
   g_object_class_override_property (gobject_class, PROP_MAX_PORT, "max-port");
   g_object_class_override_property (gobject_class, PROP_MIN_PORT, "min-port");
+  g_object_class_override_property (gobject_class, PROP_FINALIZE_SOCKET,
+      "finalize-socket");
+  g_object_class_override_property (gobject_class, PROP_RTP_SOCKET,
+      "rtp-socket");
+  g_object_class_override_property (gobject_class, PROP_RTCP_SOCKET,
+      "rtcp-socket");
 
   g_object_class_install_property (gobject_class, PROP_TRANSPORT,
       g_param_spec_object ("transport", "Transport",
@@ -379,6 +404,7 @@ kms_webrtc_rtp_connection_collect_latency_stats (KmsIRtpConnection * obj,
     gboolean enable)
 {
   KmsWebRtcConnection *self = KMS_WEBRTC_CONNECTION (obj);
+
   KmsWebRtcBaseConnection *base = KMS_WEBRTC_BASE_CONNECTION (obj);
 
   KMS_WEBRTC_BASE_CONNECTION_LOCK (self);

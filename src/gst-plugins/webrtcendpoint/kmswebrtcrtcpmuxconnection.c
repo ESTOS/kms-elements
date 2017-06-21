@@ -39,6 +39,9 @@ enum
   PROP_IS_CLIENT,
   PROP_MIN_PORT,
   PROP_MAX_PORT,
+  PROP_FINALIZE_SOCKET,
+  PROP_RTP_SOCKET,
+  PROP_RTCP_SOCKET,
   PROP_TRANSPORT
 };
 
@@ -70,6 +73,7 @@ kms_webrtc_rtcp_mux_connection_get_certificate_pem_file (KmsWebRtcBaseConnection
     * base_conn)
 {
   KmsWebRtcRtcpMuxConnection *self = KMS_WEBRTC_RTCP_MUX_CONNECTION (base_conn);
+
   gchar *pem;
 
   g_object_get (G_OBJECT (self->priv->tr->src->dtlssrtpdec), "pem", &pem, NULL);
@@ -84,6 +88,7 @@ kms_webrtc_rtcp_mux_connection_add (KmsIRtpConnection * base_rtp_conn,
   KmsWebRtcRtcpMuxConnection *self =
       KMS_WEBRTC_RTCP_MUX_CONNECTION (base_rtp_conn);
   KmsWebRtcRtcpMuxConnectionPrivate *priv = self->priv;
+
   KmsWebRtcTransport *tr = priv->tr;
 
   /* srcs */
@@ -122,6 +127,7 @@ kms_webrtc_rtcp_mux_connection_request_rtp_sink (KmsIRtpConnection *
   KmsWebRtcRtcpMuxConnection *self =
       KMS_WEBRTC_RTCP_MUX_CONNECTION (base_rtp_conn);
   GstPad *pad;
+
   gchar *str;
 
   str = g_strdup_printf ("rtp_sink_%d",
@@ -152,6 +158,7 @@ kms_webrtc_rtcp_mux_connection_request_rtcp_sink (KmsIRtpConnection *
       KMS_WEBRTC_RTCP_MUX_CONNECTION (base_rtp_conn);
 
   GstPad *pad;
+
   gchar *str;
 
   str = g_strdup_printf ("rtcp_sink_%d",
@@ -247,8 +254,11 @@ kms_webrtc_rtcp_mux_connection_new (KmsIceBaseAgent * agent,
     guint16 max_port, gchar * pem_certificate)
 {
   GObject *obj;
+
   KmsWebRtcBaseConnection *base_conn;
+
   KmsWebRtcRtcpMuxConnection *conn;
+
   KmsWebRtcRtcpMuxConnectionPrivate *priv;
 
   obj =
@@ -283,6 +293,7 @@ static void
 kms_webrtc_rtcp_mux_connection_finalize (GObject * object)
 {
   KmsWebRtcRtcpMuxConnection *self = KMS_WEBRTC_RTCP_MUX_CONNECTION (object);
+
   KmsWebRtcRtcpMuxConnectionPrivate *priv = self->priv;
 
   GST_DEBUG_OBJECT (self, "finalize");
@@ -306,6 +317,7 @@ kms_webrtc_rtcp_mux_connection_class_init (KmsWebRtcRtcpMuxConnectionClass *
     klass)
 {
   GObjectClass *gobject_class;
+
   KmsWebRtcBaseConnectionClass *base_conn_class;
 
   gobject_class = G_OBJECT_CLASS (klass);
@@ -327,6 +339,12 @@ kms_webrtc_rtcp_mux_connection_class_init (KmsWebRtcRtcpMuxConnectionClass *
   g_object_class_override_property (gobject_class, PROP_IS_CLIENT, "is-client");
   g_object_class_override_property (gobject_class, PROP_MAX_PORT, "max-port");
   g_object_class_override_property (gobject_class, PROP_MIN_PORT, "min-port");
+  g_object_class_override_property (gobject_class, PROP_FINALIZE_SOCKET,
+      "finalize-socket");
+  g_object_class_override_property (gobject_class, PROP_RTP_SOCKET,
+      "rtp-socket");
+  g_object_class_override_property (gobject_class, PROP_RTCP_SOCKET,
+      "rtcp-socket");
 
   g_object_class_install_property (gobject_class, PROP_TRANSPORT,
       g_param_spec_object ("transport", "Transport",
@@ -340,6 +358,7 @@ kms_webrtc_rtcp_mux_connection_collect_latency_stats (KmsIRtpConnection * obj,
     gboolean enable)
 {
   KmsWebRtcRtcpMuxConnection *self = KMS_WEBRTC_RTCP_MUX_CONNECTION (obj);
+
   KmsWebRtcBaseConnection *base = KMS_WEBRTC_BASE_CONNECTION (obj);
 
   KMS_WEBRTC_BASE_CONNECTION_LOCK (base);
