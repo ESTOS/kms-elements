@@ -58,7 +58,7 @@ static const guint DEFAULT_STUN_PORT = 3478;
 
 std::once_flag check_openh264, certificates_flag;
 std::string defaultCertificateRSA, defaultCertificateECDSA;
-std::vector<std::string> supported_codecs = { "VP8", "opus", "PCMU" };
+std::vector<std::string> supported_codecs = { "VP8", "opus", "PCMU", "PCMA", "telephone-event"};
 
 static void
 remove_not_supported_codecs_from_array (GstElement *element, GArray *codecs)
