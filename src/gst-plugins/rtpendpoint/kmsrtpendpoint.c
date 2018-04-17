@@ -84,6 +84,9 @@ struct _KmsRtpEndpointPrivate
 
   gchar *master_key;
   KmsRtpSDESCryptoSuite crypto;
+
+  //dont use avpf on the RtpEndpoint - some switches cant handle it ru-bu RTCSP-335 , SIX-1717 , AVM
+  gboolean use_rtpep_avpf;
 };
 
 /* Signals and args */
@@ -386,6 +389,8 @@ kms_rtp_endpoint_create_session_internal (KmsBaseSdpEndpoint * base_sdp,
     g_free (local_address);
   }
 
+  g_object_get (self, "use-rtpep-avpf", &self->priv->use_rtpep_avpf, NULL);
+
   g_object_get (self, "use-ipv6", &use_ipv6, NULL);
   if (self->priv->use_sdes) {
     *sess =
@@ -680,7 +685,10 @@ kms_rtp_endpoint_get_media_handler (KmsRtpEndpoint * self, const gchar * media)
   if (self->priv->use_sdes) {
     handler = kms_rtp_endpoint_provide_sdes_handler (self, media);
   } else {
-    handler = KMS_SDP_MEDIA_HANDLER (kms_sdp_rtp_avpf_media_handler_new ());
+    if (self->priv->use_rtpep_avpf)
+      handler = KMS_SDP_MEDIA_HANDLER (kms_sdp_rtp_avpf_media_handler_new ());
+    else
+      handler = KMS_SDP_MEDIA_HANDLER (kms_sdp_rtp_avp_media_handler_new ());
   }
 
   KMS_ELEMENT_UNLOCK (self);
