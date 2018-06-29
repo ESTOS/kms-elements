@@ -127,6 +127,12 @@ kms_srtp_connection_set_remote_info (KmsRtpBaseConnection * base_conn,
 
   g_signal_emit_by_name (priv->rtp_udpsink, "add", host, rtp_port, NULL);
   g_signal_emit_by_name (priv->rtcp_udpsink, "add", host, rtcp_port, NULL);
+
+  //RTCSP-480 ru-bu
+  g_object_set (priv->rtp_udpsrc, "remote-address", host, "remote-port",
+      rtp_port, NULL);
+  g_object_set (priv->rtcp_udpsrc, "remote-address", host, "remote-port",
+      rtcp_port, NULL);
 }
 
 static void
