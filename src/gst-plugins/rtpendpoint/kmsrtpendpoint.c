@@ -781,13 +781,18 @@ kms_rtp_endpoint_configure_media (KmsBaseSdpEndpoint * base_sdp_endpoint,
   media->port = kms_rtp_base_connection_get_rtp_port (conn);
 
   attr_len = gst_sdp_media_attributes_len (media);
-  for (a = 0; a < attr_len; a++) {
+  a = 0;
+  while (a < attr_len) {
     const GstSDPAttribute *attr = gst_sdp_media_get_attribute (media, a);
 
     if (g_strcmp0 (attr->key, "rtcp") == 0) {
       gst_sdp_media_remove_attribute (media, a);
       /* TODO: complete rtcp attr with addr and rtcp port */
+      attr_len--;
+      a = 0;
+      continue;                 //start search again
     }
+    a++;
   }
 
   if (self->priv->use_sdes) {
