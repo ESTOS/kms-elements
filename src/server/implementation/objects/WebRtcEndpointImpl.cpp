@@ -36,6 +36,7 @@
 #include <RTCPeerConnectionStats.hpp>
 #include <commons/kmsstats.h>
 #include <commons/kmsutils.h>
+#include <commons/gstsdpdirection.h>
 
 #include "webrtcendpoint/kmswebrtcdatachannelstate.h"
 #include <boost/algorithm/string.hpp>
@@ -65,7 +66,7 @@ remove_not_supported_codecs_from_array (GstElement *element, GArray *codecs)
 {
   guint i;
 
-  if (codecs == NULL) {
+  if (codecs == nullptr) {
     return;
   }
 
@@ -83,10 +84,9 @@ remove_not_supported_codecs_from_array (GstElement *element, GArray *codecs)
     s = gst_value_get_structure (v);
     codec_name = gst_structure_get_name (s);
 
-    for (std::vector<std::string>::iterator it = supported_codecs.begin();
-         it != supported_codecs.end(); ++it) {
+    for (auto &supported_codec : supported_codecs) {
 
-      if (boost::istarts_with (codec_name, (*it) ) ) {
+      if (boost::istarts_with (codec_name, supported_codec) ) {
         supported = TRUE;
         break;
       }
@@ -121,11 +121,12 @@ check_support_for_h264 ()
 
   plugin = gst_plugin_load_by_name ("openh264");
 
-  if (plugin == NULL) {
+  if (plugin == nullptr) {
+    GST_WARNING ("H264 is NOT supported: Plugin 'openh264' not found");
     return;
   }
 
-  supported_codecs.push_back ("H264");
+  supported_codecs.emplace_back ("H264");
   gst_object_unref (plugin);
 }
 
@@ -172,7 +173,7 @@ void WebRtcEndpointImpl::checkUri (std::string &uri)
     try {
       path = getConfigValue <std::string, WebRtcEndpoint> (CONFIG_PATH);
     } catch (boost::property_tree::ptree_error &e) {
-      GST_DEBUG ("WebRtcEndpoint config file doesn't contain a defaul path");
+      GST_DEBUG ("WebRtcEndpoint config file doesn't contain a default path");
       path = getConfigValue <std::string> (CONFIG_PATH, DEFAULT_PATH);
     }
 
@@ -289,10 +290,11 @@ void WebRtcEndpointImpl::newSelectedPairFull (gchar *sessId,
   std::map<std::string, std::shared_ptr <IceCandidatePair>>::iterator it;
 
   GST_DEBUG_OBJECT (element,
-                    "New pair selected stream_id: %s, component_id: %d, local candidate: %s,"
-                    " remote candidate: %s", streamId, componentId,
+                    "New candidate pair selected, local: '%s', remote: '%s'"
+                    ", stream_id: '%s', component_id: %d",
                     kms_ice_candidate_get_candidate (localCandidate),
-                    kms_ice_candidate_get_candidate (remoteCandidate) );
+                    kms_ice_candidate_get_candidate (remoteCandidate),
+                    streamId, componentId);
 
   candidatePair = std::make_shared< IceCandidatePair > (streamId,
                   componentId,
@@ -427,7 +429,8 @@ WebRtcEndpointImpl::getCerficateFromFile (std::string &path)
 
 WebRtcEndpointImpl::WebRtcEndpointImpl (const boost::property_tree::ptree &conf,
                                         std::shared_ptr<MediaPipeline>
-                                        mediaPipeline, bool useDataChannels,
+                                        mediaPipeline, bool recvonly,
+                                        bool sendonly, bool useDataChannels,
                                         std::shared_ptr<CertificateKeyType> certificateKeyType) :
   BaseRtpEndpointImpl (conf,
                        std::dynamic_pointer_cast<MediaObjectImpl>
@@ -441,6 +444,14 @@ WebRtcEndpointImpl::WebRtcEndpointImpl (const boost::property_tree::ptree &conf,
   std::call_once (certificates_flag,
                   std::bind (&WebRtcEndpointImpl::generateDefaultCertificates, this) );
 
+  if (recvonly) {
+    g_object_set (element, "offer-dir", GST_SDP_DIRECTION_RECVONLY, NULL);
+  }
+
+  if (sendonly) {
+    g_object_set (element, "offer-dir", GST_SDP_DIRECTION_SENDONLY, NULL);
+  }
+
   if (useDataChannels) {
     g_object_set (element, "use-data-channels", TRUE, NULL);
   }
@@ -450,9 +461,9 @@ WebRtcEndpointImpl::WebRtcEndpointImpl (const boost::property_tree::ptree &conf,
   //set properties
   try {
     stunPort = getConfigValue <unsigned, WebRtcEndpoint> ("stunServerPort");
-  } catch (std::exception &e) {
-    GST_INFO ("Setting default port %d to stun server. Reason: %s",
-              DEFAULT_STUN_PORT, e.what() );
+  } catch (std::exception &) {
+    GST_INFO ("STUN server Port not found in config;"
+              " using default value: %d", DEFAULT_STUN_PORT);
     stunPort = DEFAULT_STUN_PORT;
   }
 
@@ -460,29 +471,38 @@ WebRtcEndpointImpl::WebRtcEndpointImpl (const boost::property_tree::ptree &conf,
     try {
       stunAddress = getConfigValue
                     <std::string, WebRtcEndpoint> ("stunServerAddress");
-    } catch (boost::property_tree::ptree_error &e) {
-      GST_INFO ("Stun address not found in config, cannot operate behind a NAT" );
+    } catch (boost::property_tree::ptree_error &) {
+      GST_INFO ("STUN server IP address not found in config;"
+                " NAT traversal requires either STUN or TURN server");
     }
 
     if (!stunAddress.empty() ) {
-      GST_INFO ("stun port %d\n", stunPort );
-      g_object_set ( G_OBJECT (element), "stun-server-port",
-                     stunPort, NULL);
+      GST_INFO ("Using STUN reflexive server IP: %s", stunAddress.c_str() );
+      GST_INFO ("Using STUN reflexive server Port: %d", stunPort);
 
-      GST_INFO ("stun address %s\n", stunAddress.c_str() );
-      g_object_set ( G_OBJECT (element), "stun-server",
-                     stunAddress.c_str(),
-                     NULL);
+      g_object_set (G_OBJECT (element), "stun-server-port", stunPort, NULL);
+      g_object_set (G_OBJECT (element), "stun-server", stunAddress.c_str(), NULL);
     }
   }
 
   try {
     turnURL = getConfigValue <std::string, WebRtcEndpoint> ("turnURL");
-    GST_INFO ("turn info: %s\n", turnURL.c_str() );
-    g_object_set ( G_OBJECT (element), "turn-url", turnURL.c_str(),
-                   NULL);
-  } catch (boost::property_tree::ptree_error &e) {
 
+    std::string safeURL = "<user:password>";
+    size_t separatorPos = turnURL.find_last_of ('@');
+
+    if (separatorPos == std::string::npos) {
+      safeURL.append ("@").append (turnURL);
+    } else {
+      safeURL.append (turnURL.substr (separatorPos) );
+    }
+
+    GST_INFO ("Using TURN relay server: %s", safeURL.c_str() );
+
+    g_object_set (G_OBJECT (element), "turn-url", turnURL.c_str(), NULL);
+  } catch (boost::property_tree::ptree_error &) {
+    GST_INFO ("TURN server IP address not found in config;"
+              " NAT traversal requires either STUN or TURN server");
   }
 
   switch (certificateKeyType->getValue () ) {
@@ -546,7 +566,7 @@ WebRtcEndpointImpl::getStunServerAddress ()
 
   g_object_get ( G_OBJECT (element), "stun-server", &ret, NULL);
 
-  if (ret != NULL) {
+  if (ret != nullptr) {
     stunServerAddress = std::string (ret);
     g_free (ret);
   }
@@ -587,7 +607,7 @@ WebRtcEndpointImpl::getTurnUrl ()
 
   g_object_get ( G_OBJECT (element), "turn-url", &ret, NULL);
 
-  if (ret != NULL) {
+  if (ret != nullptr) {
     turnUrl = std::string (ret);
     g_free (ret);
   }
@@ -647,18 +667,18 @@ WebRtcEndpointImpl::gatherCandidates ()
 void
 WebRtcEndpointImpl::addIceCandidate (std::shared_ptr<IceCandidate> candidate)
 {
-  gboolean ret;
+  gboolean ret = FALSE;
   std::string cand_str = candidate->getCandidate();
   std::string mid_str = candidate->getSdpMid ();
   guint8 sdp_m_line_index = candidate->getSdpMLineIndex ();
-  KmsIceCandidate *cand = kms_ice_candidate_new (cand_str.c_str(),
-                          mid_str.c_str(),
-                          sdp_m_line_index, NULL);
+  KmsIceCandidate *cand = kms_ice_candidate_new (
+                            cand_str.c_str(), mid_str.c_str(), sdp_m_line_index, nullptr);
 
-  g_signal_emit_by_name (element, "add-ice-candidate", this->sessId.c_str (),
-                         cand, &ret);
-
-  g_object_unref (cand);
+  if (cand) {
+    g_signal_emit_by_name (element, "add-ice-candidate", this->sessId.c_str (),
+                           cand, &ret);
+    g_object_unref (cand);
+  }
 
   if (!ret) {
     throw KurentoException (ICE_ADD_CANDIDATE_ERROR, "Error adding candidate");
@@ -897,14 +917,14 @@ WebRtcEndpointImpl::fillStatsReport (std::map
                                      <std::string, std::shared_ptr<Stats>>
                                      &report, const GstStructure *stats, double timestamp)
 {
-  const GstStructure *data_stats = NULL;
+  const GstStructure *data_stats = nullptr;
 
   BaseRtpEndpointImpl::fillStatsReport (report, stats, timestamp);
 
   data_stats = kms_utils_get_structure_by_name (stats,
                KMS_DATA_SESSION_STATISTICS_FIELD);
 
-  if (data_stats != NULL) {
+  if (data_stats != nullptr) {
     return collectRTCDataChannelStats (report, timestamp, data_stats);
   }
 }
@@ -912,10 +932,11 @@ WebRtcEndpointImpl::fillStatsReport (std::map
 MediaObjectImpl *
 WebRtcEndpointImplFactory::createObject (const boost::property_tree::ptree
     &conf, std::shared_ptr<MediaPipeline>
-    mediaPipeline, bool useDataChannels,
+    mediaPipeline, bool recvonly, bool sendonly, bool useDataChannels,
     std::shared_ptr<CertificateKeyType> certificateKeyType) const
 {
-  return new WebRtcEndpointImpl (conf, mediaPipeline, useDataChannels,
+  return new WebRtcEndpointImpl (conf, mediaPipeline, recvonly,
+                                 sendonly, useDataChannels,
                                  certificateKeyType);
 }
 

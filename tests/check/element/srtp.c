@@ -103,14 +103,13 @@ GST_START_TEST (test_window_size)
   fail_unless (ret == GST_FLOW_OK);
 
   ret = gst_harness_push (h, generate_test_buffer (0));
-  fail_unless (ret == GST_FLOW_OK);
+  fail_unless (ret == GST_FLOW_ERROR);
 
   gst_harness_teardown (h);
   g_object_unref (srtpenc);
 }
 
-GST_END_TEST;
-
+GST_END_TEST
 GST_START_TEST (test_allow_repeat_tx)
 {
   GstElement *srtpenc = gst_element_factory_make ("srtpenc", NULL);
@@ -129,19 +128,25 @@ GST_START_TEST (test_allow_repeat_tx)
   ret = gst_harness_push (h, generate_test_buffer (1));
   fail_unless (ret == GST_FLOW_OK);
 
-  ret = gst_harness_push (h, generate_test_buffer (65));
+  ret = gst_harness_push (h, generate_test_buffer (64));
   fail_unless (ret == GST_FLOW_OK);
 
+  // libsrtp minimum sequence number = Current - Window + 1
+  // = 64 - 64 + 1 = 1
+
+  // libsrtp should allow: sequence 1 is the first in the replay window
   ret = gst_harness_push (h, generate_test_buffer (1));
   fail_unless (ret == GST_FLOW_OK);
+
+  // libsrtp should reject: sequence 0 is beyond the replay window
+  ret = gst_harness_push (h, generate_test_buffer (0));
+  fail_unless (ret == GST_FLOW_ERROR);
 
   gst_harness_teardown (h);
   g_object_unref (srtpenc);
 }
 
-GST_END_TEST;
-
-static Suite *
+GST_END_TEST static Suite *
 srtp_suite (void)
 {
   Suite *s = suite_create ("srtp");
@@ -154,4 +159,4 @@ srtp_suite (void)
   return s;
 }
 
-GST_CHECK_MAIN (srtp);
+GST_CHECK_MAIN (srtp)

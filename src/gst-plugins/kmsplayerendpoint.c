@@ -33,7 +33,6 @@
 #define PLUGIN_NAME "playerendpoint"
 #define AUDIO_APPSRC "audio_appsrc"
 #define VIDEO_APPSRC "video_appsrc"
-#define URIDECODEBIN "uridecodebin"
 #define RTSPSRC "rtspsrc"
 
 #define APPSRC_KEY "appsrc-key"
@@ -46,6 +45,7 @@ G_DEFINE_QUARK (APPSINK_KEY, appsink);
 G_DEFINE_QUARK (PTS_KEY, pts);
 
 #define NETWORK_CACHE_DEFAULT 2000
+#define PORT_RANGE_DEFAULT "0-0"
 #define IS_PREROLL TRUE
 
 GST_DEBUG_CATEGORY_STATIC (kms_player_endpoint_debug_category);
@@ -84,6 +84,7 @@ struct _KmsPlayerEndpointPrivate
   KmsLoop *loop;
   gboolean use_encoded_media;
   gint network_cache;
+  gchar *port_range;
 
   GMutex base_time_mutex;
   gboolean reset;
@@ -100,6 +101,8 @@ enum
   PROP_VIDEO_DATA,
   PROP_POSITION,
   PROP_NETWORK_CACHE,
+  PROP_PORT_RANGE,
+  PROP_PIPELINE,
   N_PROPERTIES
 };
 
@@ -128,6 +131,7 @@ typedef struct _KmsPtsData
 
   GstClockTime last_pts;
   GstClockTime last_pts_orig;
+  gboolean pts_handled;
 } KmsPtsData;
 
 static void
@@ -147,6 +151,7 @@ kms_pts_data_new ()
   data->offset_time = GST_CLOCK_TIME_NONE;
   data->last_pts = GST_CLOCK_TIME_NONE;
   data->last_pts_orig = GST_CLOCK_TIME_NONE;
+  data->pts_handled = FALSE;
 
   return data;
 }
@@ -159,11 +164,18 @@ kms_pts_data_reset (KmsPtsData * data)
 }
 
 static void
-kms_player_endpoint_set_caps (KmsPlayerEndpoint * self)
+kms_player_endpoint_disable_decoding (KmsPlayerEndpoint * self)
 {
+  /* By setting the caps of the uridecodebin element, with all formats
+   * except 'application/x-rtp', what we achieve is that all incoming formats
+   * will be passed directly to the media pipeline (as is expected of the
+   * 'useEncodedMedia' mode), but incoming RTP streams will still be depayloaded.
+   * Passing RTP packets directly to the pipeline, without depayloading,
+   * is not supported. */
+
   GstCaps *deco_caps;
 
-  deco_caps = gst_caps_from_string (KMS_AGNOSTIC_CAPS_CAPS);
+  deco_caps = gst_caps_from_string (KMS_AGNOSTIC_NO_RTP_CAPS);
   g_object_set (G_OBJECT (self->priv->uridecodebin), "caps", deco_caps, NULL);
   gst_caps_unref (deco_caps);
 }
@@ -178,12 +190,16 @@ kms_player_endpoint_set_property (GObject * object, guint property_id,
     case PROP_USE_ENCODED_MEDIA:{
       playerendpoint->priv->use_encoded_media = g_value_get_boolean (value);
       if (playerendpoint->priv->use_encoded_media) {
-        kms_player_endpoint_set_caps (playerendpoint);
+        kms_player_endpoint_disable_decoding (playerendpoint);
       }
       break;
     }
     case PROP_NETWORK_CACHE:
       playerendpoint->priv->network_cache = g_value_get_int (value);
+      break;
+    case PROP_PORT_RANGE:
+      g_free (playerendpoint->priv->port_range);
+      playerendpoint->priv->port_range = g_value_dup_string (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -252,8 +268,14 @@ kms_player_endpoint_get_property (GObject * object, guint property_id,
       g_value_set_int64 (value, position);
       break;
     }
+    case PROP_PIPELINE:
+      g_value_set_object (value, playerendpoint->priv->pipeline);
+      break;
     case PROP_NETWORK_CACHE:
       g_value_set_int (value, playerendpoint->priv->network_cache);
+      break;
+    case PROP_PORT_RANGE:
+      g_value_set_string (value, playerendpoint->priv->port_range);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -346,6 +368,9 @@ kms_player_endpoint_finalize (GObject * object)
   g_mutex_clear (&self->priv->base_time_mutex);
   g_clear_object (&self->priv->stats.src);
   kms_list_unref (self->priv->stats.probes);
+
+  g_free (self->priv->port_range);
+  self->priv->port_range = NULL;
 
   G_OBJECT_CLASS (kms_player_endpoint_parent_class)->finalize (object);
 }
@@ -442,24 +467,33 @@ process_sample (GstAppSink * appsink, GstAppSrc * appsrc, GstSample * sample,
 
   buffer = gst_sample_get_buffer (sample);
   if (buffer == NULL) {
+    GST_ERROR_OBJECT (appsink, "Cannot get buffer");
     goto end;
   }
 
+  gst_buffer_ref (buffer);
+  buffer = gst_buffer_make_writable (buffer);
+
+  pts_data =
+      (KmsPtsData *) g_object_get_qdata (G_OBJECT (appsink), pts_quark ());
+
   if (!GST_BUFFER_PTS_IS_VALID (buffer) && !GST_BUFFER_DTS_IS_VALID (buffer)) {
-    GST_ERROR_OBJECT (appsink, "PTS and DTS are not valid.");
-    return GST_FLOW_OK;
+    if (pts_data->pts_handled) {
+      GST_ERROR_OBJECT (appsink,
+          "PTS and DTS are not valid and a previous buffer was handled.");
+      ret = GST_FLOW_OK;
+      goto end;
+    }
+
+    goto push;
   } else if (!GST_BUFFER_PTS_IS_VALID (buffer)) {
     GST_BUFFER_PTS (buffer) = GST_BUFFER_DTS (buffer);
   } else if (!GST_BUFFER_DTS_IS_VALID (buffer)) {
     GST_BUFFER_DTS (buffer) = GST_BUFFER_PTS (buffer);
   }
 
-  gst_buffer_ref (buffer);
-  buffer = gst_buffer_make_writable (buffer);
+  pts_data->pts_handled = TRUE;
   pts_orig = GST_BUFFER_PTS (buffer);
-
-  pts_data =
-      (KmsPtsData *) g_object_get_qdata (G_OBJECT (appsink), pts_quark ());
 
   if (is_preroll) {
     GST_DEBUG_OBJECT (appsink, "Preroll: reset base time");
@@ -506,8 +540,8 @@ process_sample (GstAppSink * appsink, GstAppSrc * appsrc, GstSample * sample,
       goto end;
     } else if (pts_orig == pts_data->last_pts_orig) {
       GST_DEBUG_OBJECT (appsink,
-          "Original PTS equals than last PTS (original PTS: %" GST_TIME_FORMAT
-          ", is preroll: %d). It seems to be already pushed.",
+          "Original PTS equals last PTS (original PTS: %" GST_TIME_FORMAT
+          ", is preroll: %d). Seems to be already pushed.",
           GST_TIME_ARGS (pts_orig), is_preroll);
       goto end;
     }
@@ -540,6 +574,7 @@ process_sample (GstAppSink * appsink, GstAppSrc * appsrc, GstSample * sample,
   pts_data->last_pts = GST_BUFFER_PTS (buffer);
   pts_data->last_pts_orig = pts_orig;
 
+push:
   src = gst_element_get_static_pad (GST_ELEMENT (appsrc), "src");
   sink = gst_pad_get_peer (src);
   g_object_unref (src);
@@ -557,7 +592,7 @@ process_sample (GstAppSink * appsink, GstAppSrc * appsrc, GstSample * sample,
   buffer = NULL;
   if (ret != GST_FLOW_OK) {
     GST_ERROR_OBJECT (appsink,
-        "Could not send buffer to appsrc %s. Cause: %s",
+        "Could not send buffer to '%s'. Cause: %s",
         GST_ELEMENT_NAME (appsrc), gst_flow_get_name (ret));
   }
 
@@ -574,7 +609,7 @@ end:
 }
 
 static GstFlowReturn
-new_preroll_cb (GstAppSink * appsink, gpointer user_data)
+appsink_new_preroll_cb (GstAppSink * appsink, gpointer user_data)
 {
   GstSample *sample;
 
@@ -584,7 +619,7 @@ new_preroll_cb (GstAppSink * appsink, gpointer user_data)
 }
 
 static GstFlowReturn
-new_sample_cb (GstAppSink * appsink, gpointer user_data)
+appsink_new_sample_cb (GstAppSink * appsink, gpointer user_data)
 {
   GstSample *sample;
 
@@ -594,43 +629,41 @@ new_sample_cb (GstAppSink * appsink, gpointer user_data)
 }
 
 static void
-eos_cb (GstAppSink * appsink, gpointer user_data)
+appsink_eos_cb (GstAppSink * appsink, gpointer user_data)
 {
   GstAppSrc *appsrc = GST_APP_SRC (user_data);
   GstFlowReturn ret;
   GstPad *pad;
 
-  GST_DEBUG_OBJECT (appsrc, "Sending eos event to main pipeline");
-
+  GST_DEBUG_OBJECT (appsink, "Send EOS event to main pipeline (via %s)",
+      GST_ELEMENT_NAME (appsrc));
   ret = gst_app_src_end_of_stream (appsrc);
+  GST_DEBUG_OBJECT (appsink, "Send EOS return: %s", gst_flow_get_name (ret));
 
   pad = gst_element_get_static_pad (GST_ELEMENT (appsrc), "src");
   if (pad != NULL) {
+    GST_INFO_OBJECT (pad, "Send flush events");
+
     gst_pad_send_event (pad, gst_event_new_flush_start ());
-    gst_pad_send_event (pad, gst_event_new_flush_stop (0));
+    gst_pad_send_event (pad, gst_event_new_flush_stop (FALSE));
+
     g_object_unref (pad);
   }
-
-  GST_DEBUG_OBJECT (appsrc, "Returned %s", gst_flow_get_name (ret));
 }
 
 static GstPadProbeReturn
-main_pipeline_probe (GstPad * pad, GstPadProbeInfo * info, gpointer element)
+appsrc_query_probe (GstPad * pad, GstPadProbeInfo * info, gpointer element)
 {
   GstQuery *query = GST_PAD_PROBE_INFO_QUERY (info);
+  GstQueryType type = GST_QUERY_TYPE (query);
   GstElement *appsink = GST_ELEMENT (element);
 
-  switch (GST_QUERY_TYPE (query)) {
-    case GST_QUERY_CAPS:
-    case GST_QUERY_ACCEPT_CAPS:
-      break;
-    default:
-      return GST_PAD_PROBE_OK;
+  if (type == GST_QUERY_CAPS || type == GST_QUERY_ACCEPT_CAPS) {
+    query = gst_query_make_writable (query);
+    // Send query upstream to the uridecodebin
+    gst_element_query (appsink, query);
+    GST_PAD_PROBE_INFO_DATA (info) = query;
   }
-
-  query = gst_query_make_writable (query);
-  gst_element_query (appsink, query);
-  GST_PAD_PROBE_INFO_DATA (info) = query;
 
   return GST_PAD_PROBE_OK;
 }
@@ -644,49 +677,27 @@ kms_player_end_point_add_appsrc (KmsPlayerEndpoint * self,
 
   /* Create appsrc element and link to agnosticbin */
   appsrc = gst_element_factory_make ("appsrc", NULL);
-  g_object_set (G_OBJECT (appsrc), "is-live", TRUE, "do-timestamp", FALSE,
+
+  g_object_set (G_OBJECT (appsrc), "is-live", TRUE, "do-timestamp", TRUE,
       "min-latency", G_GUINT64_CONSTANT (0), "max-latency",
       G_GUINT64_CONSTANT (0), "format", GST_FORMAT_TIME,
       "emit-signals", FALSE, NULL);
 
   srcpad = gst_element_get_static_pad (appsrc, "src");
   gst_pad_add_probe (srcpad, GST_PAD_PROBE_TYPE_QUERY_UPSTREAM,
-      main_pipeline_probe, appsink, NULL);
+      appsrc_query_probe, appsink, NULL);
   g_object_unref (srcpad);
 
   gst_bin_add (GST_BIN (self), appsrc);
+
   if (!gst_element_link (appsrc, agnosticbin)) {
-    GST_ERROR ("Could not link %s to element %s", GST_ELEMENT_NAME (appsrc),
+    GST_ERROR ("Cannot link elements: %s to %s", GST_ELEMENT_NAME (appsrc),
         GST_ELEMENT_NAME (agnosticbin));
   }
 
   gst_element_sync_state_with_parent (appsrc);
 
   return appsrc;
-}
-
-static GstPadProbeReturn
-set_appsrc_caps (GstPad * pad, GstPadProbeInfo * info, gpointer element)
-{
-  GstEvent *event = GST_PAD_PROBE_INFO_EVENT (info);
-  GstElement *appsrc = GST_ELEMENT (element);
-  GstCaps *caps;
-
-  if (GST_EVENT_TYPE (event) != GST_EVENT_CAPS) {
-    return GST_PAD_PROBE_OK;
-  }
-
-  gst_event_parse_caps (event, &caps);
-  if (caps == NULL) {
-    GST_ERROR_OBJECT (pad, "Invalid caps received");
-    return GST_PAD_PROBE_OK;
-  }
-
-  GST_DEBUG_OBJECT (appsrc, "Setting caps %" GST_PTR_FORMAT, caps);
-
-  g_object_set (G_OBJECT (appsrc), "caps", caps, NULL);
-
-  return GST_PAD_PROBE_OK;
 }
 
 static void
@@ -722,79 +733,98 @@ static GstElement *
 kms_player_end_point_get_agnostic_for_pad (KmsPlayerEndpoint * self,
     GstPad * pad)
 {
-  GstCaps *caps, *audio_caps = NULL, *video_caps = NULL;
+  GstCaps *caps;
   GstElement *agnosticbin = NULL;
 
   caps = gst_pad_query_caps (pad, NULL);
-
   if (caps == NULL) {
     return NULL;
   }
 
-  audio_caps = gst_caps_from_string (KMS_AGNOSTIC_AUDIO_CAPS);
-  video_caps = gst_caps_from_string (KMS_AGNOSTIC_VIDEO_CAPS);
+  GST_DEBUG_OBJECT (pad, "Prepare for input caps: %" GST_PTR_FORMAT, caps);
 
   /* TODO: Update latency probe to set valid and media type */
-  if (gst_caps_can_intersect (audio_caps, caps)) {
+  if (kms_utils_caps_is_audio (caps)) {
+    GST_DEBUG_OBJECT (pad, "Detected audio caps");
     agnosticbin = kms_element_get_audio_agnosticbin (KMS_ELEMENT (self));
     kms_player_end_point_add_stat_probe (self, pad, KMS_MEDIA_TYPE_AUDIO);
-  } else if (gst_caps_can_intersect (video_caps, caps)) {
+  } else if (kms_utils_caps_is_video (caps)) {
+    GST_DEBUG_OBJECT (pad, "Detected video caps");
     agnosticbin = kms_element_get_video_agnosticbin (KMS_ELEMENT (self));
     kms_player_end_point_add_stat_probe (self, pad, KMS_MEDIA_TYPE_VIDEO);
   }
 
   gst_caps_unref (caps);
-  gst_caps_unref (audio_caps);
-  gst_caps_unref (video_caps);
 
   return agnosticbin;
 }
 
 static GstPadProbeReturn
-negotiate_appsrc_caps (GstPad * pad, GstPadProbeInfo * info, gpointer element)
+appsink_probe_set_appsrc_caps (GstPad * pad, GstPadProbeInfo * info,
+    gpointer element)
 {
-  GstQuery *query = GST_PAD_PROBE_INFO_QUERY (info);
+  GstEvent *event = GST_PAD_PROBE_INFO_EVENT (info);
   GstElement *appsrc = GST_ELEMENT (element);
-  GstPad *srcpad;
+  GstCaps *caps;
 
-  switch (GST_QUERY_TYPE (query)) {
-    case GST_QUERY_CAPS:
-    case GST_QUERY_ACCEPT_CAPS:
-      break;
-    default:
-      return GST_PAD_PROBE_OK;
+  if (GST_EVENT_TYPE (event) != GST_EVENT_CAPS) {
+    return GST_PAD_PROBE_OK;
   }
 
-  query = gst_query_make_writable (query);
-  srcpad = gst_element_get_static_pad (appsrc, "src");
-  /* Send query to the agnosticbin */
-  gst_pad_peer_query (srcpad, query);
-  g_object_unref (srcpad);
-  GST_PAD_PROBE_INFO_DATA (info) = query;
+  gst_event_parse_caps (event, &caps);
+  if (caps == NULL) {
+    GST_ERROR_OBJECT (pad, "Invalid caps received");
+    return GST_PAD_PROBE_OK;
+  }
+
+  GST_DEBUG_OBJECT (appsrc, "Set new caps: %" GST_PTR_FORMAT, caps);
+  g_object_set (G_OBJECT (appsrc), "caps", caps, NULL);
 
   return GST_PAD_PROBE_OK;
 }
 
 static GstPadProbeReturn
-internal_pipeline_probe (GstPad * pad, GstPadProbeInfo * info, gpointer element)
+appsink_probe_query_appsrc_caps (GstPad * pad, GstPadProbeInfo * info,
+    gpointer element)
 {
-  if (GST_PAD_PROBE_INFO_TYPE (info) & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
-    return set_appsrc_caps (pad, info, element);
-  } else if (GST_PAD_PROBE_INFO_TYPE (info) &
-      GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM) {
-    return negotiate_appsrc_caps (pad, info, element);
-  } else {
-    GST_WARNING_OBJECT (pad, "Probe does nothing");
-    return GST_PAD_PROBE_OK;
+  GstQuery *query = GST_PAD_PROBE_INFO_QUERY (info);
+  GstQueryType type = GST_QUERY_TYPE (query);
+  GstElement *appsrc = GST_ELEMENT (element);
+
+  if (type == GST_QUERY_CAPS || type == GST_QUERY_ACCEPT_CAPS) {
+    query = gst_query_make_writable (query);
+    // Send query downstream to the agnosticbin
+    gst_element_query (appsrc, query);
+    GST_PAD_PROBE_INFO_DATA (info) = query;
   }
+
+  return GST_PAD_PROBE_OK;
+}
+
+static GstPadProbeReturn
+appsink_event_query_probe (GstPad * pad, GstPadProbeInfo * info,
+    gpointer element)
+{
+  GstPadProbeType type = GST_PAD_PROBE_INFO_TYPE (info);
+
+  if (type & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
+    return appsink_probe_set_appsrc_caps (pad, info, element);
+  } else if (type & GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM) {
+    return appsink_probe_query_appsrc_caps (pad, info, element);
+  }
+
+  GST_WARNING_OBJECT (pad, "Probe does nothing");
+  return GST_PAD_PROBE_OK;
 }
 
 static void
-pad_added (GstElement * element, GstPad * pad, KmsPlayerEndpoint * self)
+kms_player_endpoint_uridecodebin_pad_added (GstElement * element, GstPad * pad,
+    KmsPlayerEndpoint * self)
 {
   GstElement *appsink, *appsrc;
   GstElement *agnosticbin;
   GstPad *sinkpad;
+  GstPadLinkReturn link_ret;
 
   GST_DEBUG_OBJECT (pad, "Pad added");
 
@@ -810,9 +840,9 @@ pad_added (GstElement * element, GstPad * pad, KmsPlayerEndpoint * self)
     g_object_set (appsink, "enable-last-sample", FALSE, "emit-signals", FALSE,
         "qos", FALSE, "max-buffers", 1, NULL);
 
-    callbacks.eos = eos_cb;
-    callbacks.new_preroll = new_preroll_cb;
-    callbacks.new_sample = new_sample_cb;
+    callbacks.eos = appsink_eos_cb;
+    callbacks.new_preroll = appsink_new_preroll_cb;
+    callbacks.new_sample = appsink_new_sample_cb;
     gst_app_sink_set_callbacks (GST_APP_SINK (appsink), &callbacks, appsrc,
         NULL);
 
@@ -832,14 +862,21 @@ pad_added (GstElement * element, GstPad * pad, KmsPlayerEndpoint * self)
   sinkpad = gst_element_get_static_pad (appsink, "sink");
 
   if (agnosticbin != NULL) {
-    gst_pad_add_probe (sinkpad,
-        (GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM |
-            GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM), internal_pipeline_probe,
+    gst_pad_add_probe (sinkpad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM
+        | GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM, appsink_event_query_probe,
         appsrc, NULL);
   }
 
   gst_bin_add (GST_BIN (self->priv->pipeline), appsink);
-  gst_pad_link (pad, sinkpad);
+
+  link_ret = gst_pad_link (pad, sinkpad);
+
+  if (GST_PAD_LINK_FAILED (link_ret)) {
+    GST_ERROR ("Cannot link elements: %s to %s: %s",
+        GST_ELEMENT_NAME (GST_PAD_PARENT (pad)),
+        GST_ELEMENT_NAME (GST_PAD_PARENT (sinkpad)),
+        gst_pad_link_get_name (link_ret));
+  }
 
   g_object_unref (sinkpad);
 
@@ -847,21 +884,8 @@ pad_added (GstElement * element, GstPad * pad, KmsPlayerEndpoint * self)
 }
 
 static void
-kms_remove_element_from_bin (GstBin * bin, GstElement * element)
-{
-  GST_DEBUG ("Removing %" GST_PTR_FORMAT " from %" GST_PTR_FORMAT, element,
-      bin);
-
-  if (!gst_element_set_locked_state (element, TRUE)) {
-    GST_ERROR ("Could not block element %" GST_PTR_FORMAT, element);
-  }
-
-  gst_element_set_state (element, GST_STATE_NULL);
-  gst_bin_remove (bin, element);
-}
-
-static void
-pad_removed (GstElement * element, GstPad * pad, KmsPlayerEndpoint * self)
+kms_player_endpoint_uridecodebin_pad_removed (GstElement * element,
+    GstPad * pad, KmsPlayerEndpoint * self)
 {
   GstElement *appsink, *appsrc;
 
@@ -870,38 +894,38 @@ pad_removed (GstElement * element, GstPad * pad, KmsPlayerEndpoint * self)
   if (GST_PAD_IS_SINK (pad))
     return;
 
-  GST_DEBUG ("pad %" GST_PTR_FORMAT " removed", pad);
-
   kms_player_end_point_remove_stat_probe (self, pad);
 
   appsink = g_object_steal_qdata (G_OBJECT (pad), appsink_quark ());
   appsrc = g_object_steal_qdata (G_OBJECT (pad), appsrc_quark ());
 
   if (appsink != NULL) {
-    kms_remove_element_from_bin (GST_BIN (self->priv->pipeline), appsink);
+    kms_utils_bin_remove (GST_BIN (self->priv->pipeline), appsink);
   }
 
   if (appsrc != NULL) {
-    kms_remove_element_from_bin (GST_BIN (self), appsrc);
+    kms_utils_bin_remove (GST_BIN (self), appsrc);
   }
 }
 
-static void
-kms_player_endpoint_stopped (KmsUriEndpoint * obj)
+static gboolean
+kms_player_endpoint_stopped (KmsUriEndpoint * obj, GError ** error)
 {
   KmsPlayerEndpoint *self = KMS_PLAYER_ENDPOINT (obj);
 
   GST_DEBUG_OBJECT (self, "Pipeline stopped");
 
-  /* Set internal pipeline to NULL */
+  // Set internal pipeline to NULL state
   kms_player_endpoint_mark_reset_base_time_and_set_state (self, GST_STATE_NULL);
 
   KMS_URI_ENDPOINT_GET_CLASS (self)->change_state (KMS_URI_ENDPOINT (self),
       KMS_URI_ENDPOINT_STATE_STOP);
+
+  return TRUE;
 }
 
-static void
-kms_player_endpoint_started (KmsUriEndpoint * obj)
+static gboolean
+kms_player_endpoint_started (KmsUriEndpoint * obj, GError ** error)
 {
   KmsPlayerEndpoint *self = KMS_PLAYER_ENDPOINT (obj);
 
@@ -916,6 +940,8 @@ kms_player_endpoint_started (KmsUriEndpoint * obj)
 
   KMS_URI_ENDPOINT_GET_CLASS (self)->change_state (KMS_URI_ENDPOINT (self),
       KMS_URI_ENDPOINT_STATE_START);
+
+  return TRUE;
 }
 
 static gboolean
@@ -955,8 +981,8 @@ kms_player_endpoint_set_position (KmsPlayerEndpoint * self, gint64 position)
   return TRUE;
 }
 
-static void
-kms_player_endpoint_paused (KmsUriEndpoint * obj)
+static gboolean
+kms_player_endpoint_paused (KmsUriEndpoint * obj, GError ** error)
 {
   KmsPlayerEndpoint *self = KMS_PLAYER_ENDPOINT (obj);
   GstStateChangeReturn ret;
@@ -984,6 +1010,8 @@ kms_player_endpoint_paused (KmsUriEndpoint * obj)
 
   KMS_URI_ENDPOINT_GET_CLASS (self)->change_state (KMS_URI_ENDPOINT (self),
       KMS_URI_ENDPOINT_STATE_PAUSE);
+
+  return TRUE;
 }
 
 static void
@@ -1055,7 +1083,7 @@ kms_player_endpoint_class_init (KmsPlayerEndpointClass * klass)
   g_object_class_install_property (gobject_class, PROP_USE_ENCODED_MEDIA,
       g_param_spec_boolean ("use-encoded-media", "use encoded media",
           "The element uses encoded media instead of raw media. This mode "
-          "could have an unexpected behaviour if key frames are lost",
+          "could have an unexpected behaviour if keyframes are lost",
           FALSE, G_PARAM_READWRITE | GST_PARAM_MUTABLE_READY));
 
   g_object_class_install_property (gobject_class, PROP_VIDEO_DATA,
@@ -1073,6 +1101,17 @@ kms_player_endpoint_class_init (KmsPlayerEndpointClass * klass)
           "When using rtsp sources, the amount of ms to buffer",
           0, G_MAXINT, NETWORK_CACHE_DEFAULT,
           G_PARAM_READWRITE | GST_PARAM_MUTABLE_READY));
+
+  g_object_class_install_property (gobject_class, PROP_PORT_RANGE,
+      g_param_spec_string ("port-range", "UDP port range for RTSP client",
+          "Range of ports that can be allocated when acting as RTSP client, "
+          "eg. '3000-3005' ('0-0' = no restrictions)", PORT_RANGE_DEFAULT,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class, PROP_PIPELINE,
+      g_param_spec_object ("pipeline", "Internal pipeline",
+          "PlayerEndpoint's private pipeline",
+          GST_TYPE_ELEMENT, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
 
   kms_player_endpoint_signals[SIGNAL_EOS] =
       g_signal_new ("eos",
@@ -1109,8 +1148,8 @@ kms_player_endpoint_class_init (KmsPlayerEndpointClass * klass)
 static gboolean
 kms_player_endpoint_emit_EOS_signal (gpointer data)
 {
-  GST_DEBUG ("Emit EOS Signal");
-  kms_player_endpoint_stopped (KMS_URI_ENDPOINT (data));
+  GST_DEBUG ("Emit 'EOS' signal and stop endpoint");
+  kms_player_endpoint_stopped (KMS_URI_ENDPOINT (data), NULL);
   g_signal_emit (G_OBJECT (data), kms_player_endpoint_signals[SIGNAL_EOS], 0);
 
   return G_SOURCE_REMOVE;
@@ -1121,7 +1160,7 @@ kms_player_endpoint_emit_invalid_uri_signal (gpointer data)
 {
   KmsPlayerEndpoint *self = KMS_PLAYER_ENDPOINT (data);
 
-  GST_DEBUG ("Emit invalid uri signal");
+  GST_DEBUG ("Emit 'Invalid URI' signal");
   g_signal_emit (G_OBJECT (self),
       kms_player_endpoint_signals[SIGNAL_INVALID_URI], 0);
 
@@ -1133,7 +1172,7 @@ kms_player_endpoint_emit_invalid_media_signal (gpointer data)
 {
   KmsPlayerEndpoint *self = KMS_PLAYER_ENDPOINT (data);
 
-  GST_DEBUG ("Emit invalid media signal");
+  GST_DEBUG ("Emit 'Invalid Media' signal");
   g_signal_emit (G_OBJECT (self),
       kms_player_endpoint_signals[SIGNAL_INVALID_MEDIA], 0);
 
@@ -1176,8 +1215,13 @@ kms_player_endpoint_post_media_error (gpointer d)
 {
   ErrorData *data = d;
 
-  gst_element_post_message (GST_ELEMENT (data->self),
+  gboolean ok = gst_element_post_message (GST_ELEMENT (data->self),
       gst_message_ref (data->message));
+
+  if (!ok) {
+    GST_ERROR ("gst_element_post_message() FAILED");
+    gst_message_unref (data->message);
+  }
 
   return G_SOURCE_REMOVE;
 }
@@ -1192,7 +1236,6 @@ bus_sync_signal_handler (GstBus * bus, GstMessage * msg, gpointer data)
         kms_player_endpoint_emit_EOS_signal, g_object_ref (self),
         g_object_unref);
   } else if (GST_MESSAGE_TYPE (msg) == GST_MESSAGE_ERROR) {
-
     if (g_str_has_prefix (GST_OBJECT_NAME (msg->src), "decodebin")) {
       kms_loop_idle_add_full (self->priv->loop, G_PRIORITY_HIGH_IDLE,
           kms_player_endpoint_emit_invalid_media_signal, g_object_ref (self),
@@ -1204,7 +1247,6 @@ bus_sync_signal_handler (GstBus * bus, GstMessage * msg, gpointer data)
     } else {
       ErrorData *data = create_error_data (self, msg);
 
-      GST_ERROR_OBJECT (self, "Error: %" GST_PTR_FORMAT, msg);
       kms_loop_idle_add_full (self->priv->loop, G_PRIORITY_HIGH_IDLE,
           kms_player_endpoint_post_media_error, data, delete_error_data);
     }
@@ -1213,16 +1255,17 @@ bus_sync_signal_handler (GstBus * bus, GstMessage * msg, gpointer data)
 }
 
 static void
-source_setup_cb (GstElement * uridecodebin, GstElement * source,
-    KmsPlayerEndpoint * self)
+kms_player_endpoint_uridecodebin_source_setup (GstElement * uridecodebin,
+    GstElement * source, KmsPlayerEndpoint * self)
 {
   GstPad *srcpad;
 
   srcpad = gst_element_get_static_pad (source, "src");
 
   if (srcpad == NULL) {
-    GST_WARNING_OBJECT (self, "Can not set latency probe to %" GST_PTR_FORMAT,
-        source);
+    GST_WARNING_OBJECT (self, "Skip setting latency probe, no src pad in %"
+        GST_PTR_FORMAT " (%s)", uridecodebin, G_OBJECT_TYPE_NAME (source));
+
     return;
   }
 
@@ -1241,15 +1284,68 @@ source_setup_cb (GstElement * uridecodebin, GstElement * source,
 }
 
 static void
-element_added (GstBin * bin, GstElement * element, gpointer data)
+kms_player_endpoint_uridecodebin_element_added (GstBin * bin,
+    GstElement * element, gpointer data)
 {
   KmsPlayerEndpoint *self = KMS_PLAYER_ENDPOINT (data);
 
   if (g_strcmp0 (gst_plugin_feature_get_name (GST_PLUGIN_FEATURE
               (gst_element_get_factory (element))), RTSPSRC) == 0) {
-    g_object_set (G_OBJECT (element), "latency", self->priv->network_cache,
-        NULL);
+    g_object_set (G_OBJECT (element),
+        "latency", self->priv->network_cache,
+        "drop-on-latency", TRUE, "port-range", self->priv->port_range, NULL);
   }
+}
+
+static gboolean
+process_bus_message (GstBus * bus, GstMessage * msg, KmsPlayerEndpoint * self)
+{
+  GstDebugLevel log_level = GST_LEVEL_NONE;
+  GError *err = NULL;
+  gchar *dbg_info = NULL;
+
+  switch (GST_MESSAGE_TYPE (msg)) {
+    case GST_MESSAGE_ERROR:
+      log_level = GST_LEVEL_ERROR;
+      gst_message_parse_error (msg, &err, &dbg_info);
+      break;
+    case GST_MESSAGE_WARNING:
+      log_level = GST_LEVEL_WARNING;
+      gst_message_parse_warning (msg, &err, &dbg_info);
+      break;
+    default:
+      return TRUE;
+      break;
+  }
+
+  GstElement *parent = self->priv->pipeline;
+  gint err_code = 0;
+  gchar *err_msg = NULL;
+
+  if (err != NULL) {
+    err_code = err->code;
+    err_msg = err->message;
+  }
+
+  GST_CAT_LEVEL_LOG (GST_CAT_DEFAULT, log_level, self,
+      "Error code %d: '%s', element: %s, parent: %s", err_code,
+      (err_msg ? err_msg : "(None)"), GST_MESSAGE_SRC_NAME (msg),
+      GST_ELEMENT_NAME (parent));
+
+  GST_CAT_LEVEL_LOG (GST_CAT_DEFAULT, log_level, self,
+      "Debugging info: %s", (dbg_info ? dbg_info : "(None)"));
+
+  gchar *dot_name = g_strdup_printf ("%s_bus_%d", GST_OBJECT_NAME (self),
+      err_code);
+
+  GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS (GST_BIN (parent), GST_DEBUG_GRAPH_SHOW_ALL,
+      dot_name);
+  g_free (dot_name);
+
+  g_error_free (err);
+  g_free (dbg_info);
+
+  return TRUE;
 }
 
 static void
@@ -1264,23 +1360,27 @@ kms_player_endpoint_init (KmsPlayerEndpoint * self)
   self->priv->base_time_preroll = GST_CLOCK_TIME_NONE;
 
   self->priv->loop = kms_loop_new ();
-  self->priv->pipeline = gst_pipeline_new ("pipeline");
-  self->priv->uridecodebin =
-      gst_element_factory_make ("uridecodebin", URIDECODEBIN);
+  self->priv->pipeline = gst_pipeline_new ("internalpipeline");
+  self->priv->uridecodebin = gst_element_factory_make ("uridecodebin", NULL);
   self->priv->network_cache = NETWORK_CACHE_DEFAULT;
+  self->priv->port_range = g_strdup (PORT_RANGE_DEFAULT);
 
   self->priv->stats.probes = kms_list_new_full (g_direct_equal, g_object_unref,
       (GDestroyNotify) kms_stats_probe_destroy);
 
   /* Connect to signals */
   g_signal_connect (self->priv->uridecodebin, "pad-added",
-      G_CALLBACK (pad_added), self);
+      G_CALLBACK (kms_player_endpoint_uridecodebin_pad_added), self);
   g_signal_connect (self->priv->uridecodebin, "pad-removed",
-      G_CALLBACK (pad_removed), self);
+      G_CALLBACK (kms_player_endpoint_uridecodebin_pad_removed), self);
   g_signal_connect (self->priv->uridecodebin, "source-setup",
-      G_CALLBACK (source_setup_cb), self);
+      G_CALLBACK (kms_player_endpoint_uridecodebin_source_setup), self);
   g_signal_connect (self->priv->uridecodebin, "element-added",
-      G_CALLBACK (element_added), self);
+      G_CALLBACK (kms_player_endpoint_uridecodebin_element_added), self);
+
+  /* Eat all async messages such as buffering messages */
+  bus = gst_pipeline_get_bus (GST_PIPELINE (self->priv->pipeline));
+  gst_bus_add_watch (bus, (GstBusFunc) process_bus_message, self);
 
   g_object_set (self->priv->uridecodebin, "download", TRUE, NULL);
 
@@ -1294,7 +1394,6 @@ kms_player_endpoint_init (KmsPlayerEndpoint * self)
 gboolean
 kms_player_endpoint_plugin_init (GstPlugin * plugin)
 {
-
   return gst_element_register (plugin, PLUGIN_NAME, GST_RANK_NONE,
       KMS_TYPE_PLAYER_ENDPOINT);
 }

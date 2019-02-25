@@ -19,8 +19,10 @@
 #include "VideoInfo.hpp"
 #include <PlayerEndpointImplFactory.hpp>
 #include "PlayerEndpointImpl.hpp"
+#include <DotGraph.hpp>
 #include <jsonrpc/JsonSerializer.hpp>
 #include <KurentoException.hpp>
+#include <memory>
 #include <gst/gst.h>
 #include "SignalHandler.hpp"
 
@@ -31,8 +33,10 @@ GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
 #define FACTORY_NAME "playerendpoint"
 #define VIDEO_DATA "video-data"
 #define POSITION "position"
+#define PIPELINE "pipeline"
 #define SET_POSITION "set-position"
 #define NS_TO_MS 1000000
+#define RTSP_CLIENT_PORT_RANGE "rtspClientPortRange"
 
 namespace kurento
 {
@@ -50,7 +54,7 @@ void PlayerEndpointImpl::invalidUri ()
 {
   try {
     /* TODO: Define error codes and types*/
-    Error error (shared_from_this(), "Invalid Uri", 0, "INVALID_URI");
+    Error error (shared_from_this(), "Invalid URI", 0, "INVALID_URI");
 
     signalError (error);
   } catch (std::bad_weak_ptr &e) {
@@ -103,6 +107,15 @@ PlayerEndpointImpl::PlayerEndpointImpl (const boost::property_tree::ptree &conf,
 
   g_object_set (G_OBJECT (element), "use-encoded-media", useEncodedMedia,
                 "network-cache", networkCache, NULL);
+
+  try {
+    std::string portRange = getConfigValue <std::string, PlayerEndpoint>
+                            (RTSP_CLIENT_PORT_RANGE);
+    g_object_set (G_OBJECT (element), "port-range", portRange.c_str(), NULL);
+  } catch (boost::property_tree::ptree_error &) {
+    GST_DEBUG ("PlayerEndpoint config file doesn't contain property %s. Ignoring.",
+               RTSP_CLIENT_PORT_RANGE);
+  }
 }
 
 PlayerEndpointImpl::~PlayerEndpointImpl()
@@ -131,7 +144,7 @@ std::shared_ptr<VideoInfo> PlayerEndpointImpl::getVideoInfo ()
 
   g_object_get (G_OBJECT (element), VIDEO_DATA, &video_data, NULL);
 
-  if (video_data == NULL) {
+  if (video_data == nullptr) {
     GST_ERROR ("structure null");
   }
 
@@ -154,6 +167,15 @@ int64_t PlayerEndpointImpl::getPosition ()
   g_object_get (G_OBJECT (element), POSITION, &position, NULL);
 
   return position / NS_TO_MS;
+}
+
+std::string PlayerEndpointImpl::getElementGstreamerDot ()
+{
+  GValue *pipeline;
+  g_object_get (G_OBJECT (element), PIPELINE, &pipeline, NULL);
+  return generateDotGraph (
+           GST_BIN (pipeline),
+           std::make_shared<GstreamerDotDetails> (GstreamerDotDetails::SHOW_VERBOSE) );
 }
 
 void PlayerEndpointImpl::setPosition (int64_t position)

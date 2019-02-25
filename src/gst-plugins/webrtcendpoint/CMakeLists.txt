@@ -1,9 +1,5 @@
 cmake_minimum_required(VERSION 2.8)
 
-if (NOT (${CMAKE_SYSTEM_NAME} MATCHES "Windows"))
-  set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
-endif ()
-
 set(CUSTOM_PREFIX "kurento")
 set(INCLUDE_PREFIX "${CMAKE_INSTALL_INCLUDEDIR}/${CUSTOM_PREFIX}/webrtcendpoint")
 
@@ -68,6 +64,15 @@ target_link_libraries(webrtcdataproto
   ${gstreamer-sctp-1.5_LIBRARIES}
 )
 
+set_property (TARGET webrtcdataproto
+  PROPERTY INCLUDE_DIRECTORIES
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}/../../..
+    ${KmsGstCommons_INCLUDE_DIRS}
+    ${gstreamer-1.5_INCLUDE_DIRS}
+)
+
 set_target_properties(webrtcdataproto PROPERTIES PUBLIC_HEADER "${KMS_WEBRTC_DATA_PROTOCOL_HEADERS}")
 set_target_properties(webrtcdataproto PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 
@@ -114,7 +119,8 @@ set(KMS_WEBRTC_HEADERS
 add_glib_marshal(KMS_WEBRTC_SOURCES KMS_WEBRTC_HEADERS kms-webrtc-marshal __kms_webrtc_marshal)
 
 add_library(kmswebrtcendpointlib SHARED ${KMS_WEBRTC_SOURCES} ${KMS_WEBRTC_HEADERS})
-add_dependencies(kmswebrtcendpointlib rtcpdemux webrtcdataproto)
+
+add_dependencies(kmswebrtcendpointlib rtcpdemux)
 
 target_link_libraries(kmswebrtcendpointlib
   webrtcdataproto
@@ -124,6 +130,15 @@ target_link_libraries(kmswebrtcendpointlib
   ${gstreamer-pbutils-1.5_LIBRARIES}
   ${nice_LIBRARIES}
   -lkmssdpagent -lgstsdp-1.5.dll
+)
+
+set_property (TARGET kmswebrtcendpointlib
+  PROPERTY INCLUDE_DIRECTORIES
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}/../../..
+    ${KmsGstCommons_INCLUDE_DIRS}
+    ${gstreamer-1.5_INCLUDE_DIRS}
+    ${nice_INCLUDE_DIRS}
 )
 
 set_target_properties(kmswebrtcendpointlib PROPERTIES PUBLIC_HEADER "${KMS_WEBRTC_HEADERS}")
@@ -153,16 +168,12 @@ install(FILES
 )
 
 add_library(webrtcendpoint MODULE kmswebrtc.c)
-add_dependencies(webrtcendpoint kmswebrtcendpointlib)
 
-include_directories(
+set_property (TARGET webrtcendpoint
+  PROPERTY INCLUDE_DIRECTORIES
+    ${CMAKE_CURRENT_BINARY_DIR}/../../..
   ${KmsGstCommons_INCLUDE_DIRS}
   ${gstreamer-1.5_INCLUDE_DIRS}
-  ${gstreamer-base-1.5_INCLUDE_DIRS}
-  ${gstreamer-pbutils-1.5_INCLUDE_DIRS}
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${CMAKE_CURRENT_BINARY_DIR}
-  ${nice_INCLUDE_DIRS}
 )
 
 target_link_libraries(webrtcendpoint

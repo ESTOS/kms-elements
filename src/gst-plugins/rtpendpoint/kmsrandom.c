@@ -15,14 +15,14 @@
  *
  */
 
-#include <unistd.h>
+#include <unistd.h>             // 'syscall()' is not POSIX, requires GNU extensions in GCC
 #ifdef __linux__
 #include <sys/syscall.h>
-#include <linux/random.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #include <sys/ioctl.h>
+#include <fcntl.h>
+#include <linux/random.h>
 #else
 #include <stdlib.h>
 #endif

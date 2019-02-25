@@ -55,12 +55,12 @@ bool RecorderEndpointImpl::support_ksr;
 static bool
 check_support_for_ksr ()
 {
-  GstPlugin *plugin = NULL;
+  GstPlugin *plugin = nullptr;
   bool supported;
 
   plugin = gst_plugin_load_by_name ("kmsrecorder");
 
-  supported = plugin != NULL;
+  supported = plugin != nullptr;
 
   g_clear_object (&plugin);
 
@@ -236,11 +236,11 @@ setDeprecatedProperties (std::shared_ptr<EndpointStats> eStats)
   std::vector<std::shared_ptr<MediaLatencyStat>> inStats =
         eStats->getE2ELatency();
 
-  for (unsigned i = 0; i < inStats.size(); i++) {
-    if (inStats[i]->getName() == "sink_audio_default") {
-      eStats->setAudioE2ELatency (inStats[i]->getAvg() );
-    } else if (inStats[i]->getName() == "sink_video_default") {
-      eStats->setVideoE2ELatency (inStats[i]->getAvg() );
+  for (auto &inStat : inStats) {
+    if (inStat->getName() == "sink_audio_default") {
+      eStats->setAudioE2ELatency (inStat->getAvg() );
+    } else if (inStat->getName() == "sink_video_default") {
+      eStats->setVideoE2ELatency (inStat->getAvg() );
     }
   }
 }
@@ -282,7 +282,7 @@ RecorderEndpointImpl::fillStatsReport (std::map
 
   e_stats = kms_utils_get_structure_by_name (stats, KMS_MEDIA_ELEMENT_FIELD);
 
-  if (e_stats != NULL) {
+  if (e_stats != nullptr) {
     collectEndpointStats (report, getId (), e_stats, timestamp);
   }
 

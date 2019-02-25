@@ -24,6 +24,8 @@
 #include <CryptoSuite.hpp>
 #include <SDES.hpp>
 #include <SignalHandler.hpp>
+#include <memory>
+#include <string>
 
 #define GST_CAT_DEFAULT kurento_rtp_endpoint_impl
 GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
@@ -31,8 +33,12 @@ GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
 
 #define FACTORY_NAME "rtpendpoint"
 
-#define MIN_KEY_LENGTH 30
-#define MAX_KEY_LENGTH 46
+/* In theory the Master key can be shorter than the maximum length, but
+ * the GStreamer's SRTP plugin enforces using the maximum length possible
+ * for the type of cypher used (in file 'gstsrtpenc.c'). So, KMS also expects
+ * that the maximum Master key size is used. */
+#define KMS_SRTP_CIPHER_AES_CM_128_SIZE  ((gsize)30)
+#define KMS_SRTP_CIPHER_AES_CM_256_SIZE  ((gsize)46)
 
 namespace kurento
 {
@@ -48,25 +54,24 @@ RtpEndpointImpl::RtpEndpointImpl (const boost::property_tree::ptree &conf,
     return;
   }
 
-  if (!crypto->isSetKey() ) {
+  if (!crypto->isSetKey() && !crypto->isSetKeyBase64() ) {
     /* Use random key */
     g_object_set (element, "crypto-suite", crypto->getCrypto()->getValue(),
                   NULL);
     return;
   }
 
-  std::string key = crypto->getKey();
-  unsigned len;
+  gsize expect_size;
 
   switch (crypto->getCrypto()->getValue() ) {
   case CryptoSuite::AES_128_CM_HMAC_SHA1_32:
   case CryptoSuite::AES_128_CM_HMAC_SHA1_80:
-    len = MIN_KEY_LENGTH;
+    expect_size = KMS_SRTP_CIPHER_AES_CM_128_SIZE;
     break;
 
   case CryptoSuite::AES_256_CM_HMAC_SHA1_32:
   case CryptoSuite::AES_256_CM_HMAC_SHA1_80:
-    len = MAX_KEY_LENGTH;
+    expect_size = KMS_SRTP_CIPHER_AES_CM_256_SIZE;
     break;
 
   default:
@@ -74,12 +79,39 @@ RtpEndpointImpl::RtpEndpointImpl (const boost::property_tree::ptree &conf,
                             "Invalid crypto suite");
   }
 
-  if (key.length () != len) {
-    throw KurentoException (MEDIA_OBJECT_ILLEGAL_PARAM_ERROR,
-                            "Master key size out of range");
+  std::string key_b64;
+  gsize key_data_size = 0;
+
+  if (crypto->isSetKey() ) {
+    std::string tmp = crypto->getKey();
+    key_data_size = tmp.length();
+
+    gchar *tmp_b64 = g_base64_encode ( (const guchar *) tmp.data(), tmp.length() );
+    key_b64 = std::string (tmp_b64);
+    g_free (tmp_b64);
+  } else if (crypto->isSetKeyBase64() ) {
+    key_b64 = crypto->getKeyBase64();
+    guchar *tmp_b64 = g_base64_decode (key_b64.data(), &key_data_size);
+
+    if (!tmp_b64) {
+      GST_ERROR_OBJECT (element, "Master key is not valid Base64");
+      throw KurentoException (MEDIA_OBJECT_ILLEGAL_PARAM_ERROR,
+                              "Master key is not valid Base64");
+    }
+
+    g_free (tmp_b64);
   }
 
-  g_object_set (element, "master-key", crypto->getKey().c_str(),
+  if (key_data_size != expect_size) {
+    GST_ERROR_OBJECT (element,
+                      "Bad Base64-decoded master key size: got %" G_GSIZE_FORMAT ", expected %"
+                      G_GSIZE_FORMAT "",
+                      key_data_size, expect_size);
+    throw KurentoException (MEDIA_OBJECT_ILLEGAL_PARAM_ERROR,
+                            "Master key size is wrong");
+  }
+
+  g_object_set (element, "master-key", key_b64.data(),
                 "crypto-suite", crypto->getCrypto()->getValue(), NULL);
 }
 
@@ -110,11 +142,11 @@ RtpEndpointImpl::onKeySoftLimit (gchar *media)
   std::shared_ptr<MediaType> type;
 
   if (g_strcmp0 (media, "audio") == 0) {
-    type = std::shared_ptr<MediaType> (new MediaType (MediaType::AUDIO) );
+    type = std::make_shared<MediaType> (MediaType::AUDIO);
   } else if (g_strcmp0 (media, "video") == 0) {
-    type = std::shared_ptr<MediaType> (new MediaType (MediaType::VIDEO) );
+    type = std::make_shared<MediaType> (MediaType::VIDEO);
   } else if (g_strcmp0 (media, "data") == 0) {
-    type = std::shared_ptr<MediaType> (new MediaType (MediaType::DATA) );
+    type = std::make_shared<MediaType> (MediaType::DATA);
   } else {
     GST_ERROR ("Unsupported media %s", media);
     return;

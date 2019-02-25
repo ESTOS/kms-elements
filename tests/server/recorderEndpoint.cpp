@@ -17,6 +17,7 @@
 
 #define BOOST_TEST_STATIC_LINK
 #define BOOST_TEST_PROTECTED_VIRTUAL
+#define BOOST_TEST_IGNORE_NON_ZERO_CHILD_CODE // Don't fail if child process fails
 
 #include <boost/test/included/unit_test.hpp>
 #include <MediaPipelineImpl.hpp>
@@ -25,9 +26,10 @@
 #include <condition_variable>
 #include <ModuleManager.hpp>
 #include <MediaSet.hpp>
+#include <cstdio> // popen()
+#include <cstdlib> // system()
 
-#include <cstdio>
-#include <iostream>
+#define DIR_TEMPLATE "/tmp/recoder_test_XXXXXX"
 
 using namespace kurento;
 using namespace boost::unit_test;
@@ -44,14 +46,14 @@ struct GF {
   ~GF();
 };
 
-BOOST_GLOBAL_FIXTURE (GF)
+BOOST_GLOBAL_FIXTURE (GF);
 
 GF::GF()
 {
   boost::property_tree::ptree ac, audioCodecs, vc, videoCodecs;
-  gst_init (NULL, NULL);
+  gst_init (nullptr, nullptr);
 
-  moduleManager.loadModulesFromDirectories ("../../src/server");
+  moduleManager.loadModulesFromDirectories ("../../src/server:../../..");
 
   mediaPipelineId = moduleManager.getFactory ("MediaPipeline")->createObject (
                       config, "",
@@ -63,9 +65,9 @@ GF::~GF()
   MediaSet::deleteMediaSet();
 }
 
-std::string exec (const char *cmd)
+std::string exec (const std::string &str)
 {
-  std::shared_ptr<FILE> pipe (popen (cmd, "r"), pclose);
+  std::shared_ptr<FILE> pipe (::popen (str.c_str(), "r"), pclose);
 
   if (!pipe) {
     return "ERROR";
@@ -75,7 +77,7 @@ std::string exec (const char *cmd)
   std::string result = "";
 
   while (!feof (pipe.get() ) ) {
-    if (fgets (buffer, 128, pipe.get() ) != NULL) {
+    if (fgets (buffer, 128, pipe.get() ) != nullptr) {
       result += buffer;
     }
   }
@@ -88,10 +90,12 @@ createRecorderEndpoint ()
 {
   std::shared_ptr <kurento::MediaObjectImpl> recorderEndpoint;
   Json::Value constructorParams;
-  std::string tmp_file = std::tmpnam (nullptr);
+  gchar tmp_file_template[] = DIR_TEMPLATE;
+  gchar *tmp_file = mkdtemp (tmp_file_template);
 
   constructorParams ["mediaPipeline"] = mediaPipelineId;
-  constructorParams ["uri"] = "file://" + tmp_file;
+  constructorParams ["uri"] = "file://" + std::string (tmp_file) +
+                              "/recording.webm";
 
   recorderEndpoint = moduleManager.getFactory ("RecorderEndpoint")->createObject (
                        config, "",
@@ -109,8 +113,7 @@ releaseRecorderEndpoint (std::shared_ptr<RecorderEndpointImpl> &ep)
   MediaSet::getMediaSet ()->release (id);
 }
 
-static std::shared_ptr <MediaElementImpl>
-createTestSrc (void)
+static std::shared_ptr<MediaElementImpl> createTestSrc()
 {
   std::shared_ptr <MediaElementImpl> src = std::dynamic_pointer_cast
       <MediaElementImpl> (MediaSet::getMediaSet()->ref (new  MediaElementImpl (
@@ -222,21 +225,15 @@ recorder_state_changes ()
   src->connect (recorder);
 
   set_state (recorder, pause);
-  set_state (recorder, stop);
-  set_state (recorder, stop); /* No transition done */
-  set_state (recorder, pause);
+  set_state (recorder, pause); /* No transition done */
   set_state (recorder, start);
   set_state (recorder, pause);
   set_state (recorder, start);
   set_state (recorder, pause);
-  set_state (recorder, stop);
   set_state (recorder, pause);
   set_state (recorder, start);
   set_state (recorder, pause);
 
-  recorder->stopAndWait();
-
-  transited.store (false);
   set_state (recorder, start);
   set_state (recorder, pause);
   set_state (recorder, start);
@@ -259,22 +256,36 @@ recorder_state_changes ()
   releaseTestSrc (src);
 
   std::string uri = recorder->getUri();
+  std::cout << "Recorder URI: " << uri << std::endl;
 
   releaseRecorderEndpoint (recorder);
 
-  std::string command = "ffprobe -i " + uri +
-                        " -show_format -v quiet | sed -n 's/duration=//p'";
+  std::string cmd = "ffprobe";
+  std::string arg = " -version";
+  int rc = ::system ( (cmd + arg).c_str() );
 
-  std::string duration = exec (command.c_str() );
-  std::cout << duration << std::endl;
+  if (rc != 0) {
+    cmd = "avprobe";
+    rc = ::system ( (cmd + arg).c_str() );
+
+    if (rc != 0) {
+      BOOST_ERROR ("ffprobe or avprobe is not installed");
+    }
+  }
+
+  arg = " -show_format " + uri + " 2>/dev/null | sed -n 's/duration=//p'";
+
+  std::cout << "Exec: " << cmd + arg << std::endl;
+  std::string duration = exec (cmd + arg);
 
   float dur = atof (duration.c_str() );
   BOOST_WARN_GE (dur, EXPECTED_LEN * 0.8);
   BOOST_WARN_LE (dur, EXPECTED_LEN * 1.2);
 
-  command = "ffprobe -i " + uri +
-            " -show_streams -v quiet | sed -n 's/codec_name=//p'";
-  std::string codecs = exec (command.c_str() );
+  arg = " -show_streams " + uri + " 2>/dev/null | sed -n 's/codec_name=//p'";
+
+  std::cout << "Exec: " << cmd + arg << std::endl;
+  std::string codecs = exec (cmd + arg);
 
   BOOST_REQUIRE (codecs.find ("vp8") != std::string::npos);
   BOOST_REQUIRE (codecs.find ("opus") != std::string::npos);
@@ -285,8 +296,8 @@ recorder_state_changes ()
   std::cout << "pause_changes: " << pause_changes << std::endl;
 
   BOOST_CHECK_EQUAL (recording_changes, 7);
-  BOOST_CHECK_EQUAL (stop_changes, 4);
-  BOOST_CHECK_EQUAL (pause_changes, 9);
+  BOOST_CHECK_EQUAL (stop_changes, 1);
+  BOOST_CHECK_EQUAL (pause_changes, 7);
 
   BOOST_CHECK_EQUAL (recording_changes, start_changes);
 

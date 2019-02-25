@@ -332,7 +332,7 @@ kms_http_post_endpoint_init_pipeline (KmsHttpPostEndpoint * self)
 
   /* configure decodebin */
   if (self->priv->use_encoded_media) {
-    deco_caps = gst_caps_from_string (KMS_AGNOSTIC_CAPS_CAPS);
+    deco_caps = gst_caps_from_string (KMS_AGNOSTIC_NO_RTP_CAPS);
     g_object_set (G_OBJECT (decodebin), "caps", deco_caps, NULL);
     gst_caps_unref (deco_caps);
   }
@@ -463,7 +463,7 @@ kms_http_post_endpoint_class_init (KmsHttpPostEndpointClass * klass)
   obj_properties[PROP_USE_ENCODED_MEDIA] = g_param_spec_boolean
       ("use-encoded-media", "use encoded media",
       "The element uses encoded media instead of raw media. This mode "
-      "could have an unexpected behaviour if key frames are lost",
+      "could have an unexpected behaviour if keyframes are lost",
       FALSE, G_PARAM_READWRITE | GST_PARAM_MUTABLE_READY);
 
   g_object_class_install_properties (gobject_class,

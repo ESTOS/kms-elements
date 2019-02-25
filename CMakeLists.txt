@@ -1,26 +1,52 @@
 cmake_minimum_required(VERSION 2.8)
 
 project ("kms-elements")
+message(STATUS "CMake project: ${PROJECT_NAME}")
 
-message ("If KurentoHelpers is not found, then it is necessary to install
-          kms-cmake-utils package from the kurento repository")
+# Test configuration
+set(GENERATE_TESTS FALSE CACHE BOOL "Always build tests: add `make check_build` to normal `make` calls")
+set(DISABLE_TESTS FALSE CACHE BOOL "Enable running `make check` during the building process")
+set(VALGRIND_NUM_CALLERS 20 CACHE STRING "Valgrind option: maximum number of entries shown in stack traces")
+set(ENABLE_EXPERIMENTAL_TESTS OFF CACHE BOOL "Enable tests that are not yet stable")
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake")
+message("If KurentoHelpers is not found, you need to install 'kms-cmake-utils' from the Kurento repository")
 find_package(KurentoHelpers REQUIRED)
 
-include (KurentoGitHelpers)
-message ("If CodeGenerator is not found, then it is necessary to install
-          kms-core package from the kurento repository")
+message("If CodeGenerator is not found, you need to install 'kms-core' from the Kurento repository")
 include (CodeGenerator)
+get_values_from_model(PREFIX VALUE MODELS ${CMAKE_CURRENT_SOURCE_DIR}/src/server/interface KEYS version)
 
-get_values_from_model(PREFIX VALUE MODELS ${CMAKE_SOURCE_DIR}/src/server/interface KEYS version)
-
+include(KurentoGitHelpers)
+install_git_hook(pre-commit ${CMAKE_CURRENT_SOURCE_DIR}/hooks/pre-commit.hook)
 get_git_version (PROJECT_VERSION ${VALUE_VERSION})
-install_git_hook (pre-commit ${CMAKE_CURRENT_SOURCE_DIR}/hooks/pre-commit.hook)
+message(STATUS "Project version: ${PROJECT_NAME}-${PROJECT_VERSION}")
 
-include (GenericFind)
+# Compiler flags
+include(CommonBuildFlags)
+common_buildflags_set()
+#common_buildflags_print()
 
-generic_find (LIBNAME Boost REQUIRED COMPONENTS unit_test_framework)
+# Development: Exceptions to "Warnings are Errors" rule
+#set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=unused-function")
+
+# FIXME Disable error when macros __TIME__, __DATE__ or __TIMESTAMP__ are encountered
+include(CheckCXXCompilerFlag)
+CHECK_CXX_COMPILER_FLAG("-Wno-error=date-time" HAS_WARNING_DATE_TIME)
+if(HAS_WARNING_DATE_TIME)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=date-time")
+endif()
+
+# Generate file "config.h"
+set(VERSION ${PROJECT_VERSION})
+set(PACKAGE ${PROJECT_NAME})
+set(GETTEXT_PACKAGE "kms-elements")
+set(MANUAL_CHECK OFF CACHE BOOL "Tests will generate files")
+set(BINARY_LOCATION "http://files.openvidu.io/" CACHE STRING "Storage with test files (as an URI, http:// or file:///)")
+include(GNUInstallDirs)
+set(KURENTO_MODULES_SO_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${KURENTO_MODULES_DIR_INSTALL_PREFIX})
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
+set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -DHAVE_CONFIG_H")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_CONFIG_H")
 
 set (GST_REQUIRED ^1.5.0)
 set (GLIB_REQUIRED ^2.38)
@@ -28,7 +54,8 @@ set (SOUP_REQUIRED ^2.40)
 set (NICE_REQUIRED ^0.1.13)
 set (GLIBMM_REQUIRED ^2.37)
 
-#gst-plugins dependencies
+include(GenericFind)
+generic_find(LIBNAME Boost REQUIRED COMPONENTS unit_test_framework)
 generic_find (LIBNAME gstreamer-1.5 VERSION ${GST_REQUIRED} REQUIRED)
 generic_find (LIBNAME gstreamer-base-1.5 VERSION ${GST_REQUIRED} REQUIRED)
 generic_find (LIBNAME gstreamer-video-1.5 VERSION ${GST_REQUIRED} REQUIRED)
@@ -48,37 +75,16 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 endif ()
 generic_find (LIBNAME openssl REQUIRED)
 
-set (VERSION ${PROJECT_VERSION})
-set (PACKAGE ${PROJECT_NAME})
-set (GETTEXT_PACKAGE "kms-elements")
-set (MANUAL_CHECK OFF CACHE BOOL "Tests will generate files")
-set (ENABLE_DEBUGGING_TESTS OFF CACHE BOOL "Enable test that are not yet stable")
-
-include(GNUInstallDirs)
-
 set (CMAKE_INSTALL_GST_PLUGINS_DIR ${CMAKE_INSTALL_LIBDIR}/gstreamer-1.5)
-set (KURENTO_MODULES_SO_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${KURENTO_MODULES_DIR_INSTALL_PREFIX})
-
-set (BINARY_LOCATION "http://files.kurento.org/" CACHE STRING "Local binary directory expressed as an URI ( http:// or file:/// )")
-
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
-
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O2 -DHAVE_CONFIG_H -Werror -Wall -Werror=declaration-after-statement -Werror=strict-aliasing")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -DHAVE_CONFIG_H -Wall -Werror -std=c++11")
-
-include(CheckCXXCompilerFlag)
-
-CHECK_CXX_COMPILER_FLAG("-Wno-error=date-time" COMPILER_SUPPORTS_DATETIME_ERROR)
-if (COMPILER_SUPPORTS_DATETIME_ERROR)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=date-time")
-endif ()
 
 enable_testing()
 
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
-message(STATUS "Compiling : ${PROJECT_NAME}-${PROJECT_VERSION}")
+# Used by test "webrtcendpoint" and kmsiceniceagent
+# Enabled if the system has libnice >=0.1.14
+if(NOT nice_VERSION VERSION_LESS "0.1.14")
+  message(STATUS "libnice version >= 0.1.14, enable specific tests")
+  add_definitions(-DHAVE_LIBNICE_0_1_14)
+endif ()
 
 add_subdirectory (src)
 add_subdirectory(tests)

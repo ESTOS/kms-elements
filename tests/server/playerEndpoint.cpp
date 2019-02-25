@@ -37,7 +37,7 @@ std::string mediaPipelineId;
 ModuleManager moduleManager;
 
 #define EXPECTED_LEN 1.0
-#define PLAYED_FILE "http://files.kurento.org/video/format/small.webm"
+#define PLAYED_FILE "http://files.openvidu.io/video/format/small.webm"
 #define TIME 15 * G_TIME_SPAN_SECOND
 
 struct GF {
@@ -45,14 +45,14 @@ struct GF {
   ~GF();
 };
 
-BOOST_GLOBAL_FIXTURE (GF)
+BOOST_GLOBAL_FIXTURE (GF);
 
 GF::GF()
 {
   boost::property_tree::ptree ac, audioCodecs, vc, videoCodecs;
-  gst_init (NULL, NULL);
+  gst_init (nullptr, nullptr);
 
-  moduleManager.loadModulesFromDirectories ("../../src/server");
+  moduleManager.loadModulesFromDirectories ("../../src/server:../../..");
 
   mediaPipelineId = moduleManager.getFactory ("MediaPipeline")->createObject (
                       config, "",
@@ -89,8 +89,7 @@ releasePlayerEndpoint (std::shared_ptr<PlayerEndpointImpl> &ep)
   MediaSet::getMediaSet ()->release (id);
 }
 
-static std::shared_ptr <MediaElementImpl>
-createTestSink (void)
+static std::shared_ptr<MediaElementImpl> createTestSink()
 {
   std::shared_ptr <MediaElementImpl> src = std::dynamic_pointer_cast
       <MediaElementImpl> (MediaSet::getMediaSet()->ref (new  MediaElementImpl (
@@ -117,8 +116,8 @@ eos_received ()
 {
   std::shared_ptr <PlayerEndpointImpl> player = createPlayerEndpoint ();
   std::shared_ptr <MediaElementImpl> sink = createTestSink();
-  GCond cond;
-  GMutex mutex;
+  GCond cond{};
+  GMutex mutex{};
   bool eos = false;
   gint64 end_time;
 
@@ -162,8 +161,8 @@ eos_received_with_no_accept_eos_sink ()
 {
   std::shared_ptr <PlayerEndpointImpl> player = createPlayerEndpoint ();
   std::shared_ptr <MediaElementImpl> sink = createTestSink();
-  GCond cond;
-  GMutex mutex;
+  GCond cond{};
+  GMutex mutex{};
   bool eos = false;
   gint64 end_time;
 

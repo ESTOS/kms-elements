@@ -125,6 +125,9 @@ kms_srtp_connection_set_remote_info (KmsRtpBaseConnection * base_conn,
 
   KmsSrtpConnectionPrivate *priv = self->priv;
 
+  GST_INFO_OBJECT (self, "Set remote host: %s, RTP: %d, RTCP: %d",
+      host, rtp_port, rtcp_port);
+
   g_signal_emit_by_name (priv->rtp_udpsink, "add", host, rtp_port, NULL);
   g_signal_emit_by_name (priv->rtcp_udpsink, "add", host, rtcp_port, NULL);
 

@@ -476,7 +476,8 @@ kms_webrtc_data_channel_bin_request_open (KmsWebRtcDataChannelBin * self)
             channel_type_int);
       }
 #else
-      GST_ERROR_OBJECT (self, "Unsupported channel type (%hhx)", channel_type);
+      GST_ERROR_OBJECT (self, "Unsupported channel type (%hhx)",
+          (guchar) channel_type);
 #endif
       return;
   }

@@ -39,21 +39,25 @@ G_DEFINE_TYPE (KmsIceCandidate, kms_ice_candidate, G_TYPE_OBJECT);
 #define DEFAULT_SDP_M_LINE_INDEX    0
 
 #define BYTE_STRING_ATTR_EXPR "([\\x01-\\x09]|[\\x0B-\\x0C]|[\\x0E-\\xFF])+"    /* any byte except NUL, CR, or LF (rfc4566) */
-#define ALPHA_ATTR_EXPR "[\\x41-\\x5A]|[\\x61-\\x7A]"   /* A-Z | a-z (rfc5234) */
-#define DIGIT_ATTR_EXPR "[\\x30-\\x59]" /* 0 - 9 (rfc5234) */
 
-#define ICE_CHAR_ATTR_EXPR ALPHA_ATTR_EXPR "|" DIGIT_ATTR_EXPR "|\\x2B|\\x2f"   /* rfc5245 */
+#define ALPHA_ATTR_EXPR "[\\x41-\\x5A]|[\\x61-\\x7A]"   /* "[A-Z] | [a-z]" (rfc5234 appendix-B.1) */
+#define DIGIT_ATTR_EXPR "[\\x30-\\x39]" /* "[0-9]"         (rfc5234 appendix-B.1) */
+//J TODO - FIXME - libnice bug: Invalid candidate foundation string
+// Remove "x2D" as an option ('-'); this is a ñapa done to avoid a bug in libnice:
+// https://lists.freedesktop.org/archives/nice/2017-June/001381.html
+#define ICE_CHAR_ATTR_EXPR ALPHA_ATTR_EXPR "|" DIGIT_ATTR_EXPR "|\\x2B|\\x2F|\\x2D"     /* "ALPHA | DIGIT | + | /" (rfc5245 section-15.1) */
 
 #define EXTENSION_ATTR_EXP "( tcptype (?<tcptype>(active|passive|so)))?" \
   "( " BYTE_STRING_ATTR_EXPR " " BYTE_STRING_ATTR_EXPR ")*$"
 
 #define CANDIDATE_EXPR "^candidate:" \
-  "(?<foundation>(" ICE_CHAR_ATTR_EXPR  "){1,32})" \
-  " (?<cid>(" DIGIT_ATTR_EXPR "){1,5})" \
+  "(?<foundation>(" ICE_CHAR_ATTR_EXPR "){1,32})" \
+  " (?<componentid>(" DIGIT_ATTR_EXPR "){1,5})" \
   " (?<transport>(udp|UDP|tcp|TCP))" \
   " (?<priority>(" DIGIT_ATTR_EXPR "){1,10})" \
   " (?<addr>[0-9.:a-zA-Z]+)" \
-  " (?<port>[0-9]+) typ (?<type>(host|srflx|prflx|relay))" \
+  " (?<port>[0-9]+)" \
+  " typ (?<type>(host|srflx|prflx|relay))" \
   "( raddr (?<raddr>[0-9.:a-zA-Z]+))?" \
   "( rport (?<rport>[0-9]+))?" \
   EXTENSION_ATTR_EXP
@@ -74,6 +78,7 @@ struct _KmsIceCandidatePrivate
   gchar *sdp_mid;
   guint8 sdp_m_line_index;
   gchar *foundation;
+  KmsIceComponent component;
   guint priority;
   gchar *ip;
   KmsIceProtocol protocol;
@@ -84,6 +89,7 @@ struct _KmsIceCandidatePrivate
   gint related_port;            /* optional, -1 if not provided */
 
   gchar *stream_id;
+  gboolean is_valid;
 };
 
 static gboolean
@@ -118,6 +124,17 @@ kms_ice_candidate_update_values (KmsIceCandidate * self)
   self->priv->priority = atoi (tmp);
   g_free (tmp);
 
+  tmp = g_match_info_fetch_named (match_info, "componentid");
+  if (g_strcmp0 (tmp, "1") == 0) {
+    self->priv->component = KMS_ICE_COMPONENT_RTP;
+  } else if (g_strcmp0 (tmp, "2") == 0) {
+    self->priv->component = KMS_ICE_COMPONENT_RTCP;
+  } else {
+    GST_ERROR_OBJECT (self, "Unsupported ice candidate component %s", tmp);
+    goto end;
+  }
+  g_free (tmp);
+
   tmp = g_match_info_fetch_named (match_info, "transport");
   if (g_strcmp0 (tmp, "TCP") == 0 || g_strcmp0 (tmp, "tcp") == 0) {
     self->priv->protocol = KMS_ICE_PROTOCOL_TCP;
@@ -127,7 +144,6 @@ kms_ice_candidate_update_values (KmsIceCandidate * self)
     GST_ERROR_OBJECT (self, "Unsupported protocol %s", tmp);
     goto end;
   }
-
   g_free (tmp);
 
   tmp = g_match_info_fetch_named (match_info, "type");
@@ -143,7 +159,6 @@ kms_ice_candidate_update_values (KmsIceCandidate * self)
     GST_ERROR_OBJECT (self, "Unsupported ice candidate type %s", tmp);
     goto end;
   }
-
   g_free (tmp);
 
   tmp = g_match_info_fetch_named (match_info, "tcptype");
@@ -196,7 +211,7 @@ kms_ice_candidate_set_property (GObject * gobject, guint property_id,
 
       g_free (self->priv->candidate);
       self->priv->candidate = g_strdup (str);
-      kms_ice_candidate_update_values (self);
+      self->priv->is_valid = kms_ice_candidate_update_values (self);
       break;
     }
     case PROP_SDP_MID:{
@@ -286,6 +301,7 @@ kms_ice_candidate_init (KmsIceCandidate * self)
   self->priv->candidate = DEFAULT_CANDIDATE;
   self->priv->sdp_mid = DEFAULT_SDP_MID;
   self->priv->sdp_m_line_index = DEFAULT_SDP_M_LINE_INDEX;
+  self->priv->is_valid = FALSE;
 }
 
 KmsIceCandidate *
@@ -297,6 +313,11 @@ kms_ice_candidate_new (const gchar * candidate,
   cand = g_object_new (KMS_TYPE_ICE_CANDIDATE, "candidate",
       candidate, "sdp-mid", sdp_mid, "sdp-m-line-index", sdp_m_line_index,
       NULL);
+
+  if (!cand->priv->is_valid) {
+    g_object_unref (cand);
+    return NULL;
+  }
 
   cand->priv->stream_id = g_strdup (stream_id);
 
@@ -368,6 +389,12 @@ kms_ice_candidate_get_priority (KmsIceCandidate * self)
   return self->priv->priority;
 }
 
+KmsIceComponent
+kms_ice_candidate_get_component (KmsIceCandidate * self)
+{
+  return self->priv->component;
+}
+
 KmsIceProtocol
 kms_ice_candidate_get_protocol (KmsIceCandidate * self)
 {
@@ -396,6 +423,12 @@ gint
 kms_ice_candidate_get_related_port (KmsIceCandidate * self)
 {
   return self->priv->related_port;
+}
+
+gboolean
+kms_ice_candidate_get_valid (KmsIceCandidate * self)
+{
+  return self->priv->is_valid;
 }
 
 /* Utils end */
