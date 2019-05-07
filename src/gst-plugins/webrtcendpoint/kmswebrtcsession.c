@@ -1623,11 +1623,13 @@ kms_webrtc_session_parse_turn_url (KmsWebrtcSession * self)
     GST_INFO_OBJECT (self, "TURN server info set: %s", safe_url->str);
     g_string_free (safe_url, TRUE);
   } else {
+/* RTCSP-935 this is not a big problem if we dont have a turn server so dont print a big error
     GST_ELEMENT_ERROR (self, RESOURCE, SETTINGS,
         ("URL '%s' not allowed. It must have this format: 'user:password@address:port(?transport=[udp|tcp|tls])'",
             self->turn_url),
         ("URL '%s' not allowed. It must have this format: 'user:password@address:port(?transport=[udp|tcp|tls])'",
             self->turn_url));
+*/
   }
 
   g_match_info_free (match_info);
