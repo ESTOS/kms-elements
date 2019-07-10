@@ -40,15 +40,19 @@ GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
 #define KMS_SRTP_CIPHER_AES_CM_128_SIZE  ((gsize)30)
 #define KMS_SRTP_CIPHER_AES_CM_256_SIZE  ((gsize)46)
 
+#define PROP_MIN_PORT "min-port"
+#define PROP_MAX_PORT "max-port"
+
 namespace kurento
 {
 
 RtpEndpointImpl::RtpEndpointImpl (const boost::property_tree::ptree &conf,
                                   std::shared_ptr<MediaPipeline> mediaPipeline,
-                                  std::shared_ptr<SDES> crypto, bool useIpv6)
+                                  std::shared_ptr<SDES> crypto, bool useIpv6,
+                                  guint16 min_port, guint16 max_port)
   : BaseRtpEndpointImpl (conf,
                          std::dynamic_pointer_cast<MediaObjectImpl> (mediaPipeline),
-                         FACTORY_NAME, useIpv6)
+                         FACTORY_NAME, min_port, max_port, useIpv6)
 {
   if (!crypto->isSetCrypto() ) {
     return;
@@ -162,9 +166,11 @@ RtpEndpointImpl::onKeySoftLimit (gchar *media)
 MediaObjectImpl *
 RtpEndpointImplFactory::createObject (const boost::property_tree::ptree &conf,
                                       std::shared_ptr<MediaPipeline> mediaPipeline,
-                                      std::shared_ptr<SDES> crypto, bool useIpv6) const
+                                      std::shared_ptr<SDES> crypto, bool useIpv6,
+                                      int min_port, int max_port) const
 {
-  return new RtpEndpointImpl (conf, mediaPipeline, crypto, useIpv6);
+  return new RtpEndpointImpl (conf, mediaPipeline, crypto, useIpv6, min_port,
+                              max_port);
 }
 
 RtpEndpointImpl::StaticConstructor RtpEndpointImpl::staticConstructor;

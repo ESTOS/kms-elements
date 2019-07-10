@@ -52,6 +52,9 @@ GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
 #define CONFIG_PATH "configPath"
 #define DEFAULT_PATH "/etc/kurento"
 
+#define PROP_MIN_PORT "min-port"
+#define PROP_MAX_PORT "max-port"
+
 namespace kurento
 {
 
@@ -431,10 +434,11 @@ WebRtcEndpointImpl::WebRtcEndpointImpl (const boost::property_tree::ptree &conf,
                                         std::shared_ptr<MediaPipeline>
                                         mediaPipeline, bool recvonly,
                                         bool sendonly, bool useDataChannels,
-                                        std::shared_ptr<CertificateKeyType> certificateKeyType) :
+                                        std::shared_ptr<CertificateKeyType> certificateKeyType,
+                                        guint16 min_port, guint16 max_port) :
   BaseRtpEndpointImpl (conf,
                        std::dynamic_pointer_cast<MediaObjectImpl>
-                       (mediaPipeline), FACTORY_NAME)
+                       (mediaPipeline), FACTORY_NAME, min_port, max_port)
 {
   unsigned stunPort;
   std::string stunAddress;
@@ -933,11 +937,13 @@ MediaObjectImpl *
 WebRtcEndpointImplFactory::createObject (const boost::property_tree::ptree
     &conf, std::shared_ptr<MediaPipeline>
     mediaPipeline, bool recvonly, bool sendonly, bool useDataChannels,
-    std::shared_ptr<CertificateKeyType> certificateKeyType) const
+    std::shared_ptr<CertificateKeyType> certificateKeyType,
+    int min_port, int max_port) const
 {
   return new WebRtcEndpointImpl (conf, mediaPipeline, recvonly,
                                  sendonly, useDataChannels,
-                                 certificateKeyType);
+                                 certificateKeyType,
+                                 min_port, max_port);
 }
 
 WebRtcEndpointImpl::StaticConstructor WebRtcEndpointImpl::staticConstructor;

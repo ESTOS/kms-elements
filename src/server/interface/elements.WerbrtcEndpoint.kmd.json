@@ -201,6 +201,20 @@
               "type": "CertificateKeyType",
               "optional": true,
               "defaultValue": "RSA"
+            },
+            {
+              "name": "minPort",
+              "doc": "This configures the minPort of the endpoint.",
+              "type": "int",
+              "optional": true,
+              "defaultValue": 0
+            },
+            {
+              "name": "maxPort",
+              "doc": "This configures the maxPort of the endpoint.",
+              "type": "int",
+              "optional": true,
+              "defaultValue": 0
             }
           ]
         },

@@ -37,7 +37,8 @@ public:
 
   RtpEndpointImpl (const boost::property_tree::ptree &conf,
                    std::shared_ptr<MediaPipeline> mediaPipeline,
-                   std::shared_ptr<SDES> crypto, bool useIpv6);
+                   std::shared_ptr<SDES> crypto, bool useIpv6,
+                   guint16 min_port, guint16 max_port);
 
   virtual ~RtpEndpointImpl ();
 
