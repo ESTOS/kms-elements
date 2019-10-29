@@ -244,6 +244,9 @@ kms_ice_nice_agent_new (GMainContext * context)
 
   GST_DEBUG_OBJECT (self, "Disable UPNP support");
   g_object_set (self->priv->agent, "upnp", FALSE, NULL);
+  g_object_set (self->priv->agent, "keepalive-conncheck", TRUE, NULL);
+  g_object_set (self->priv->agent, "stun-max-retransmissions", (guint) 15,
+      NULL);
 
   g_signal_connect (self->priv->agent, "new-candidate",
       G_CALLBACK (kms_ice_nice_agent_new_candidate), self);
