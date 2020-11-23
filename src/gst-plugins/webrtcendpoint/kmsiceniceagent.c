@@ -249,6 +249,7 @@ kms_ice_nice_agent_new (GMainContext * context)
       NULL);
   g_object_set (self->priv->agent, "force-nomination-mode", TRUE, NULL);
   g_object_set (self->priv->agent, "ice-trickle", TRUE, NULL);
+  g_object_set (self->priv->agent, "support-renomination", TRUE, NULL);
 
   g_signal_connect (self->priv->agent, "new-candidate",
       G_CALLBACK (kms_ice_nice_agent_new_candidate), self);
