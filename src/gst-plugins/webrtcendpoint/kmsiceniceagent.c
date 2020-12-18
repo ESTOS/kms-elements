@@ -244,7 +244,9 @@ kms_ice_nice_agent_new (GMainContext * context)
 
   GST_DEBUG_OBJECT (self, "Disable UPNP support");
   g_object_set (self->priv->agent, "upnp", FALSE, NULL);
+  //RTCSP-1166 must be switched on
   g_object_set (self->priv->agent, "keepalive-conncheck", TRUE, NULL);
+  //RTCSP-1166 TURN retry must be longer then 2 mins
   g_object_set (self->priv->agent, "stun-max-retransmissions", (guint) 15,
       NULL);
   g_object_set (self->priv->agent, "force-nomination-mode", TRUE, NULL);
