@@ -532,7 +532,7 @@ kms_rtp_endpoint_get_supported_key (KmsRtpEndpoint * self, const GArray * keys)
   for (i = 0; i < keys->len; i++) {
     GValue *key;
 
-    key = &g_array_index (keys, GValue, 0);
+    key = &g_array_index (keys, GValue, i);
 
     if (key != NULL && kms_rtp_endpoint_is_supported_key (self, key)) {
       return key;
