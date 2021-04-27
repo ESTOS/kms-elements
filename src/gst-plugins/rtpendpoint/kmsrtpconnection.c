@@ -90,6 +90,7 @@ kms_rtp_connection_set_remote_info (KmsRtpBaseConnection * base_conn,
     const gchar * host, gint rtp_port, gint rtcp_port)
 {
   KmsRtpConnection *self = KMS_RTP_CONNECTION (base_conn);
+  gboolean gblock = FALSE;
 
   KmsRtpConnectionPrivate *priv = self->priv;
 
@@ -99,11 +100,15 @@ kms_rtp_connection_set_remote_info (KmsRtpBaseConnection * base_conn,
   g_signal_emit_by_name (priv->rtp_udpsink, "add", host, rtp_port, NULL);
   g_signal_emit_by_name (priv->rtcp_udpsink, "add", host, rtcp_port, NULL);
 
+  //RTCSP-1871 block if ANSWER contains inactive/recvonly
+  if (rtp_port == 0 && rtcp_port == 0)
+    gblock = TRUE;
+
   //RTCSP-480 ru-bu
   g_object_set (priv->rtp_udpsrc, "remote-address", host, "remote-port",
-      rtp_port, NULL);
+      rtp_port, "remote-block", gblock, NULL);
   g_object_set (priv->rtcp_udpsrc, "remote-address", host, "remote-port",
-      rtcp_port, NULL);
+      rtcp_port, "remote-block", gblock, NULL);
 }
 
 static void

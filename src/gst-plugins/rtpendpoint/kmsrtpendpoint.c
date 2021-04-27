@@ -1008,12 +1008,22 @@ kms_rtp_endpoint_start_transport_send (KmsBaseSdpEndpoint * base_sdp_endpoint,
       kms_rtp_endpoint_comedia_manager_create (self, media, conn);
     } else {
       const gchar *media_str = gst_sdp_media_get_media (media);
+      gboolean bblock = FALSE;
 
-      GST_INFO_OBJECT (self, "COMEDIA: Media '%s' doesn't use COMEDIA",
-          media_str);
       port = gst_sdp_media_get_port (media);
+
+      //RTCSP-1871 block if ANSWER contains inactive/recvonly
+      if ((gst_sdp_media_get_attribute_val (media, "recvonly") != NULL) ||
+          (gst_sdp_media_get_attribute_val (media, "inactive") != NULL))
+        bblock = TRUE;
+
+      GST_INFO_OBJECT (self,
+          "COMEDIA: Media '%s' doesn't use COMEDIA addr:%s port:%d block:%d",
+          media_str, media_con->address, port, bblock);
+
       kms_rtp_base_connection_set_remote_info (conn,
-          media_con->address, port, port + 1);
+          media_con->address, ((bblock == TRUE) ? 0 : port),
+          ((bblock == TRUE) ? 0 : (port + 1)));
       /* TODO: get rtcp port from attr if it exists */
     }
   }
