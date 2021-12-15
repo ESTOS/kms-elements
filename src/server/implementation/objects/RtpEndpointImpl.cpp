@@ -58,6 +58,8 @@ RtpEndpointImpl::RtpEndpointImpl (const boost::property_tree::ptree &conf,
     return;
   }
 
+#if 0 //PROCALL-916 PROCALL-1240 always set a key here ru-bu
+
   if (!crypto->isSetKey() && !crypto->isSetKeyBase64() ) {
     /* Use random key */
     g_object_set (element, "crypto-suite", crypto->getCrypto()->getValue(),
@@ -65,6 +67,7 @@ RtpEndpointImpl::RtpEndpointImpl (const boost::property_tree::ptree &conf,
     return;
   }
 
+#endif
   gsize expect_size;
 
   switch (crypto->getCrypto()->getValue() ) {
@@ -103,6 +106,16 @@ RtpEndpointImpl::RtpEndpointImpl (const boost::property_tree::ptree &conf,
                               "Master key is not valid Base64");
     }
 
+    g_free (tmp_b64);
+  } else {
+    //PROCALL-916 PROCALL-1240 if empty then set a key based on the pipeline ru-bu
+    std::string id = (std::dynamic_pointer_cast<MediaObjectImpl>
+                      (mediaPipeline) )->getId();
+    id.resize (expect_size);
+    key_data_size = expect_size;
+
+    gchar *tmp_b64 = g_base64_encode ( (const guchar *) id.data(), expect_size );
+    key_b64 = std::string (tmp_b64);
     g_free (tmp_b64);
   }
 
